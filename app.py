@@ -412,10 +412,11 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             )
 
             if not label:
-                if not confirmed:           label = "Invalid Data"
-                elif perm or temp:          label = "Business Closed"
+                if not confirmed:                   label = "Invalid Data"
+                elif not gm_cat:                    label = "Invalid Data"
+                elif perm or temp:                  label = "Business Closed"
                 elif gm_cat in NON_FOOD_CATEGORIES: label = "Wrong Target Group"
-                else:                       label = "Qualified / Convert"
+                else:                               label = "Qualified / Convert"
         else:
             gm_biz_status = "Not Found on Google"
             match_reason  = "No Apify result"
