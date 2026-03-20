@@ -807,6 +807,79 @@ def main():
 
     # ── TAB 1: Classify ───────────────────────────────────────
     with tab_classify:
+
+        # ── Help links ────────────────────────────────────────
+        with st.expander("📎 How to get your files — click to expand"):
+            c1, c2, c3, c4 = st.columns(4)
+
+            with c1:
+                st.markdown("**1. CRM export (Salesforce)**")
+                st.markdown(
+                    "Open the report, change the **Account Country** filter to your market, "
+                    "then export as CSV. For more than 100k rows use Salesforce Inspector (see step 4)."
+                )
+                st.link_button(
+                    "Open CRM Report →",
+                    "https://deliveryhero.lightning.force.com/lightning/r/Report/00ObO0000047MEPUA2/view?queryScope=userFolders",
+                    use_container_width=True,
+                )
+
+            with c2:
+                st.markdown("**2. Leads export (Salesforce)**")
+                st.markdown(
+                    "Open the report, change the **Country** and **Lead Source** filters to match your market, "
+                    "then export as CSV."
+                )
+                st.link_button(
+                    "Open Leads Report →",
+                    "https://deliveryhero.lightning.force.com/lightning/r/Report/00ObO0000047LqDUAU/view?queryScope=userFolders",
+                    use_container_width=True,
+                )
+
+            with c3:
+                st.markdown("**3. Apify — Google Maps Extractor**")
+                st.markdown(
+                    "Use the **URL generator tab** above to create your search URLs first. "
+                    "Paste them into Apify and run. When exporting the results, make sure "
+                    "these fields are selected:"
+                )
+                st.code(
+                    "title, temporarilyClosed, permanentlyClosed,\n"
+                    "postalCode, address, city, street,\n"
+                    "website, phone, phoneUnformatted,\n"
+                    "categoryName, categories, url, searchPageUrl",
+                    language="text",
+                )
+                st.caption("Format: CSV · View: Overview · additionalInfo can be omitted to keep file size small.")
+                st.link_button(
+                    "Open Apify Actor →",
+                    "https://console.apify.com/actors/compass~crawler-google-places",
+                    use_container_width=True,
+                )
+
+            with c4:
+                st.markdown("**4. CRM export > 100k rows — Salesforce Inspector**")
+                st.markdown(
+                    "The Salesforce report is capped at 100k rows. "
+                    "For a full export install the Chrome extension below, "
+                    "open it on any Salesforce page, go to the **Export** tab and run:"
+                )
+                st.code(
+                    "SELECT GRID__c, Name, Phone,\n"
+                    "Account_Status__c, Status_Reason__c,\n"
+                    "BillingCity\n"
+                    "FROM Account\n"
+                    "WHERE BillingCountry = 'YOUR_COUNTRY'",
+                    language="sql",
+                )
+                st.caption("Replace YOUR_COUNTRY with e.g. Norway, Turkey, Sweden etc. Download as CSV when done.")
+                st.link_button(
+                    "Salesforce Inspector Chrome Extension →",
+                    "https://chromewebstore.google.com/detail/salesforce-inspector-reloaded/hpijlohoihegkfehhibggnkbjhoemldh",
+                    use_container_width=True,
+                )
+
+        st.divider()
         col1, col2, col3 = st.columns(3)
 
         with col1:
