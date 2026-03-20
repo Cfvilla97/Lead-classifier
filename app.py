@@ -341,8 +341,19 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
     results = []
     for _, row in leads_df.iterrows():
         phone = norm_phone(row.get(phone_col_l, ""), prefix) if phone_col_l else ""
-        url   = norm_url(row.get(url_col_l, ""))             if url_col_l   else ""
         lead_name = row.get(name_col_l, "") if name_col_l else ""
+        lead_street = row.get(street_col_l, "") if street_col_l else ""
+
+        # URL key: use explicit URL column if present, otherwise reconstruct from name+street
+        # (matches what the URL generator tab produces and what Apify searchPageUrl contains)
+        if url_col_l and pd.notna(row.get(url_col_l, "")):
+            url = norm_url(row.get(url_col_l, ""))
+        else:
+            parts = str(lead_name).strip()
+            if lead_street and not pd.isna(lead_street):
+                parts += " " + str(lead_street).strip()
+            from urllib.parse import quote as _quote
+            url = norm_url("https://www.google.com/maps/search/" + _quote(parts)) if parts else ""
 
         # ── CRM duplicate check ────────────────────────────────────
         crm_match    = crm_phone_dict.get(phone) if phone else None
