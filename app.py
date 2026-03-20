@@ -299,7 +299,8 @@ def generate_google_urls(leads_df, col_map, market_cfg):
 
 
 def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
-                   apify_df, col_map_apify, market_cfg):
+                   apify_df, col_map_apify, market_cfg,
+                   confidence_threshold=0.5):
     """Main classification pipeline."""
     char_map = market_cfg["char_map"]
     prefix   = market_cfg["phone_prefix"]
@@ -398,11 +399,11 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             addr_hit   = address_match(
                 row.get(street_col_l, ""), apy.get(col_map_apify.get("address", ""), ""), char_map
             )
-            confirmed = phone_hit or (name_score >= 0.5)
+            confirmed = phone_hit or (name_score >= confidence_threshold)
 
             reasons = []
             if phone_hit: reasons.append("Phone ✓")
-            reasons.append(f"Name {name_score:.2f}" + (" ✓" if name_score >= 0.5 else " ✗"))
+            reasons.append(f"Name {name_score:.2f}" + (" ✓" if name_score >= confidence_threshold else " ✗"))
             if addr_hit:  reasons.append("Address ✓")
             match_reason = " | ".join(reasons)
             match_conf   = round(
@@ -792,6 +793,23 @@ def main():
         st.caption(f"Phone prefix: +{market_cfg['phone_prefix']}  ·  Country: {market_cfg['country_suffix']}")
 
         st.divider()
+        st.subheader("Match confidence threshold")
+        confidence_threshold = st.slider(
+            "Minimum name confidence score",
+            min_value=0.3,
+            max_value=1.0,
+            value=0.5,
+            step=0.05,
+            help="Leads where the Google Maps name score is below this value are marked Invalid Data. Default 0.5 is recommended.",
+        )
+        if confidence_threshold < 0.5:
+            st.warning(f"⚠️ Threshold set to {confidence_threshold:.2f} — matches below 0.5 may include incorrect businesses. Review the Match Confidence column carefully.")
+        elif confidence_threshold >= 0.8:
+            st.info(f"Strict mode ({confidence_threshold:.2f}) — only near-exact name matches will qualify.")
+        else:
+            st.success(f"Threshold: {confidence_threshold:.2f} (recommended)")
+
+        st.divider()
         st.subheader("About")
         st.caption(
             "Classifies leads into:\n"
@@ -941,6 +959,7 @@ def main():
                     crm_df, col_map_crm,
                     apify_df, col_map_apify,
                     market_cfg,
+                    confidence_threshold=confidence_threshold,
                 )
 
             st.success("Done!")
