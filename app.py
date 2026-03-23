@@ -204,6 +204,9 @@ def load_leads(file, market_cfg):
         grid_col = next((c for c in df.columns if str(c).strip() == "GRID"), None)
         if grid_col:
             df = df[df[grid_col].astype(str).str.match(r'^[A-Z0-9]{6,}$')].copy()
+
+    col_map = {}
+    col_map["name"]    = detect_column(df, ["Company / Account", "Account Name", "Name", "company_name", "Företag", "Virksomhed", "Vállalkozás", "Unternehmen"])
     col_map["phone"]   = detect_column(df, ["Phone", "phone_number", "Telefon", "Telefonnummer", "Mobile"])
     col_map["street"]  = detect_column(df, ["Street", "Address", "address", "Adresse", "Cím"])
     col_map["city"]    = detect_column(df, ["City", "city", "By", "Stad", "Město", "Város", "Stadt", "Restaurant City"])
