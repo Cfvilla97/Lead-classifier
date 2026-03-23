@@ -261,6 +261,11 @@ def norm_phone(p, prefix):
     if s.endswith(".0"):
         s = s[:-2]
     s = s.lstrip("0")
+    # Reject dummy/placeholder numbers before adding prefix
+    digits_raw = re.sub(r"\D", "", s)
+    if len(digits_raw) < 6:              return ""   # too short
+    if len(set(digits_raw)) == 1:        return ""   # all same digit: 00000, 11111
+    if digits_raw.endswith("0" * 6):     return ""   # ends in 6+ zeros: +4700000000
     if not s.startswith(prefix):
         s = prefix + s
     return s
