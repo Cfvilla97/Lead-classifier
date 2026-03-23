@@ -90,18 +90,157 @@ MARKETS = {
     },
 }
 
-NON_FOOD_CATEGORIES = {
-    "Haute couture fashion house", "Tattoo shop", "Hotel", "Psychologist",
-    "Corporate office", "Boutique", "Shopping mall", "Digital printer",
-    "Industrial equipment supplier", "Bakery equipment", "Bus stop",
-    "Military residence", "Chess club", "Event planner", "Betting agency",
-    "Home goods store", "Natural goods store", "General store",
-    "Convenience store", "Food manufacturer", "Food manufacturing supply",
-    "Beach club", "Wedding venue", "Rest stop", "Hair salon", "Beauty salon",
-    "Gym", "Fitness center", "Pharmacy", "Dentist", "Doctor", "Hospital",
-    "Bank", "Insurance agency", "Car dealership", "Auto repair shop",
-    "Clothing store", "Electronics store", "Furniture store",
+# Allowlist approach — only these categories are considered Foodora-eligible.
+# Anything not in this set is marked Wrong Target Group.
+FOOD_DELIVERY_ALLOWED = {
+    # Restaurants — general
+    "Restaurant", "Fine dining restaurant", "Family restaurant", "Casual dining restaurant",
+    "Buffet restaurant", "Brasserie", "Bistro", "Diner", "Eatery",
+
+    # Restaurants — cuisine specific
+    "Turkish restaurant", "Italian restaurant", "French restaurant", "Chinese restaurant",
+    "Japanese restaurant", "Thai restaurant", "Indian restaurant", "Mexican restaurant",
+    "Greek restaurant", "Lebanese restaurant", "Middle Eastern restaurant",
+    "Mediterranean restaurant", "Asian restaurant", "Korean restaurant",
+    "Vietnamese restaurant", "Spanish restaurant", "American restaurant",
+    "Ethiopian restaurant", "Afghan restaurant", "Pakistani restaurant",
+    "Nepalese restaurant", "Sri Lankan restaurant", "Bangladeshi restaurant",
+    "Indonesian restaurant", "Filipino restaurant", "Peruvian restaurant",
+    "Brazilian restaurant", "Argentinian restaurant", "Georgian restaurant",
+    "Uzbek restaurant", "Syrian restaurant", "Iraqi restaurant",
+    "Moroccan restaurant", "Egyptian restaurant", "Tunisian restaurant",
+    "Algerian restaurant", "Libyan restaurant", "Yemeni restaurant",
+    "Somali restaurant", "Nigerian restaurant", "Ghanaian restaurant",
+    "Senegalese restaurant", "Cameroonian restaurant",
+    "Caribbean restaurant", "Jamaican restaurant", "Cuban restaurant",
+    "Portuguese restaurant", "German restaurant", "Austrian restaurant",
+    "Czech restaurant", "Hungarian restaurant", "Polish restaurant",
+    "Romanian restaurant", "Bulgarian restaurant", "Croatian restaurant",
+    "Serbian restaurant", "Bosnian restaurant", "Macedonian restaurant",
+    "Albanian restaurant", "Russian restaurant", "Ukrainian restaurant",
+    "Scandinavian restaurant", "Nordic restaurant",
+    "Latin American restaurant", "Fusion restaurant", "International restaurant",
+    "European restaurant", "Pan-Asian restaurant", "Oriental restaurant",
+
+    # Fast food & quick service
+    "Fast food restaurant", "Fast-food restaurant", "Quick service restaurant",
+    "Hamburger restaurant", "Burger restaurant", "Hot dog restaurant",
+    "Fried chicken restaurant", "Chicken restaurant", "Chicken wings restaurant",
+    "Fish and chips restaurant", "Seafood restaurant", "Fish restaurant",
+    "Taco restaurant", "Burrito restaurant",
+
+    # Specific food types
+    "Pizza restaurant", "Pizza delivery", "Pizza takeaway",
+    "Kebab shop", "Kebab restaurant", "Doner kebab restaurant",
+    "Shawarma restaurant", "Falafel restaurant", "Pita restaurant",
+    "Sushi restaurant", "Ramen restaurant", "Noodle restaurant",
+    "Dumpling restaurant", "Dim sum restaurant", "Wonton restaurant",
+    "Steak house", "Steakhouse", "Grill restaurant", "Barbecue restaurant",
+    "BBQ restaurant", "Smokehouse", "Rotisserie chicken restaurant",
+    "Sandwich shop", "Submarine sandwich shop", "Wrap restaurant",
+    "Salad shop", "Bowl restaurant", "Poke bar",
+    "Soup restaurant", "Soup kitchen",
+    "Breakfast restaurant", "Brunch restaurant",
+    "Pancake restaurant", "Waffle restaurant",
+    "Dessert restaurant", "Dessert shop",
+    "Ice cream shop", "Ice cream parlor", "Frozen yogurt shop",
+    "Donut shop", "Doughnut shop",
+    "Crepe restaurant", "Waffle house",
+    "Vegetarian restaurant", "Vegan restaurant", "Plant-based restaurant",
+    "Organic restaurant", "Health food restaurant", "Gluten-free restaurant",
+    "Halal restaurant", "Kosher restaurant",
+
+    # Cafe & coffee
+    "Cafe", "Coffee shop", "Coffee house", "Coffeehouse",
+    "Espresso bar", "Tea house", "Bubble tea shop", "Boba shop",
+    "Internet cafe", "Café",
+
+    # Bakery & pastry
+    "Bakery", "Patisserie", "Pastry shop", "Cake shop",
+    "Bread bakery", "Artisan bakery", "French bakery",
+    "Donut shop", "Cookie shop", "Cupcake shop",
+    "Bagel shop",
+
+    # Delivery & takeaway oriented
+    "Meal delivery", "Food delivery", "Takeaway",
+    "Takeout restaurant", "Take-out restaurant",
+    "Catering", "Caterer", "Catering food and drink supplier",
+    "Cloud kitchen", "Ghost kitchen", "Virtual restaurant",
+
+    # Bars with food (eligible if they serve food)
+    "Bar & grill", "Bar and grill", "Sports bar", "Gastropub",
+    "Pub", "Tavern", "Tapas bar", "Wine bar",
+
+    # Specific local formats
+    "Köfte restaurant", "Kofta restaurant", "Lahmacun restaurant",
+    "Pide restaurant", "Börek shop", "Gözleme restaurant",
+    "Manti restaurant", "Tantuni restaurant", "Dürüm restaurant",
+    "Iskender restaurant", "Adana kebab restaurant",
+    "Tripe restaurant", "Offal restaurant",
+    "Mussel restaurant", "Shrimp restaurant",
+    "Kokoreç", "Simit shop",
+    "Smørbrød restaurant", "Smørrebrød restaurant",
+    "Wiener schnitzel restaurant", "Schnitzel restaurant",
+    "Goulash restaurant", "Langos", "Kürtőskalács",
+    "Trdelník shop", "Svíčková restaurant",
+    "Pierogi restaurant", "Żurek restaurant",
+    "Knedlíky restaurant", "Svíčková",
+
+    # General / catch-all food formats
+    "Food court", "Food hall", "Food stall", "Food truck",
+    "Street food restaurant", "Market restaurant",
+    "Home cooking restaurant", "Traditional restaurant",
+    "Local restaurant", "Neighborhood restaurant",
+    "Deli", "Delicatessen", "Charcuterie",
+    "Canteen", "Staff canteen", "University canteen",
+    "School cafeteria", "Hospital cafeteria", "Cafeteria",
+    "Lunchroom", "Snack bar",
+    "Juice bar", "Smoothie bar", "Açaí shop",
+
+    # Specialty
+    "Chocolate shop", "Sweet shop", "Candy store",
+    "Noodle shop", "Pasta shop", "Rice restaurant",
+    "Porridge restaurant", "Congee restaurant",
+    "Hot pot restaurant", "Fondue restaurant", "Raclette restaurant",
+    "Teppanyaki restaurant", "Okonomiyaki restaurant", "Takoyaki restaurant",
+    "Yakitori restaurant", "Izakaya", "Robatayaki restaurant",
+    "Tempura restaurant", "Tonkatsu restaurant", "Udon restaurant",
+    "Soba restaurant", "Gyoza restaurant",
+    "Pho restaurant", "Banh mi restaurant", "Spring roll restaurant",
+    "Satay restaurant", "Rendang restaurant",
+    "Curry restaurant", "Tandoori restaurant", "Biryani restaurant",
+    "Dosa restaurant", "Idli restaurant", "Thali restaurant",
+    "Ceviche restaurant", "Empanada restaurant",
+    "Arepas restaurant", "Chimichanga restaurant",
 }
+
+def is_food_delivery_eligible(category):
+    """Return True if the category is on the Foodora-eligible allowlist."""
+    if not category or pd.isna(category):
+        return False
+    cat = str(category).strip()
+    # Exact match
+    if cat in FOOD_DELIVERY_ALLOWED:
+        return True
+    # Case-insensitive fallback
+    cat_lower = cat.lower()
+    for allowed in FOOD_DELIVERY_ALLOWED:
+        if allowed.lower() == cat_lower:
+            return True
+    # Contains key food words — catches long compound category names
+    food_keywords = [
+        "restaurant", "cafe", "café", "bakery", "kebab", "pizza", "sushi",
+        "burger", "grill", "bistro", "brasserie", "diner", "eatery", "kitchen",
+        "takeaway", "takeout", "delivery", "catering", "patisserie", "pastry",
+        "coffee", "tea house", "noodle", "ramen", "deli", "canteen", "cafeteria",
+        "snack", "food truck", "street food", "bar & grill", "gastropub",
+        "steakhouse", "steak house", "seafood", "sandwich", "pide", "lahmacun",
+        "köfte", "döner", "shawarma", "falafel", "taco", "burrito",
+    ]
+    for kw in food_keywords:
+        if kw in cat_lower:
+            return True
+    return False
 
 # ─────────────────────────────────────────────
 # HELPER FUNCTIONS
@@ -424,11 +563,11 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             match_reason = " | ".join(reasons)
 
             if not label:
-                if not confirmed:                   label = "Invalid Data"
-                elif not gm_cat:                    label = "Invalid Data"
-                elif perm or temp:                  label = "Business Closed"
-                elif gm_cat in NON_FOOD_CATEGORIES: label = "Wrong Target Group"
-                else:                               label = "Qualified / Convert"
+                if not confirmed:                        label = "Invalid Data"
+                elif not gm_cat:                         label = "Invalid Data"
+                elif perm or temp:                       label = "Business Closed"
+                elif not is_food_delivery_eligible(gm_cat): label = "Wrong Target Group"
+                else:                                    label = "Qualified / Convert"
         else:
             gm_biz_status = "Not Found on Google"
             match_reason  = "No Apify result"
