@@ -407,18 +407,20 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             addr_hit   = address_match(
                 row.get(street_col_l, ""), apy.get(col_map_apify.get("address", ""), ""), char_map
             )
-            confirmed = phone_hit or (name_score >= confidence_threshold)
-
-            reasons = []
-            if phone_hit: reasons.append("Phone ✓")
-            reasons.append(f"Name {name_score:.2f}" + (" ✓" if name_score >= confidence_threshold else " ✗"))
-            if addr_hit:  reasons.append("Address ✓")
-            match_reason = " | ".join(reasons)
-            match_conf   = round(
+            match_conf = round(
                 (0.4 if phone_hit else 0.0) +
                 (min(name_score, 1.0) * 0.4) +
                 (0.2 if addr_hit else 0.0), 3
             )
+            # Phone match alone is always confirmed regardless of confidence score
+            confirmed = phone_hit or (match_conf >= confidence_threshold)
+
+            reasons = []
+            if phone_hit: reasons.append("Phone ✓")
+            reasons.append(f"Name {name_score:.2f}" + (" ✓" if name_score >= 0.5 else " ✗"))
+            if addr_hit:  reasons.append("Address ✓")
+            reasons.append(f"Confidence {match_conf:.2f}" + (" ✓" if confirmed else " ✗"))
+            match_reason = " | ".join(reasons)
 
             if not label:
                 if not confirmed:                   label = "Invalid Data"
@@ -803,17 +805,17 @@ def main():
         st.divider()
         st.subheader("Match confidence threshold")
         confidence_threshold = st.slider(
-            "Minimum name confidence score",
+            "Minimum match confidence score",
             min_value=0.3,
             max_value=1.0,
             value=0.5,
             step=0.05,
-            help="Leads where the Google Maps name score is below this value are marked Invalid Data. Default 0.5 is recommended.",
+            help="Leads where the overall Match Confidence score is below this value are marked Invalid Data. Confidence combines phone match (0.4), name similarity (0.4) and address match (0.2). Default 0.5 recommended.",
         )
         if confidence_threshold < 0.5:
-            st.warning(f"⚠️ Threshold set to {confidence_threshold:.2f} — matches below 0.5 may include incorrect businesses. Review the Match Confidence column carefully.")
+            st.warning(f"⚠️ Threshold {confidence_threshold:.2f} — low confidence matches may include incorrect businesses.")
         elif confidence_threshold >= 0.8:
-            st.info(f"Strict mode ({confidence_threshold:.2f}) — only near-exact name matches will qualify.")
+            st.info(f"Strict mode ({confidence_threshold:.2f}) — only strong phone + name matches will qualify.")
         else:
             st.success(f"Threshold: {confidence_threshold:.2f} (recommended)")
 
