@@ -181,25 +181,35 @@ def detect_column(df, candidates):
     return None
 
 
+def find_header_row(file, key_col="GRID"):
+    """Scan first 30 rows to find where key_col header appears — handles Salesforce report exports."""
+    try:
+        raw = pd.read_excel(file, header=None, nrows=30)
+        for i, row in raw.iterrows():
+            if any(str(v).strip() == key_col for v in row.dropna()):
+                return i
+    except Exception:
+        pass
+    return 0
+
+
 def load_leads(file, market_cfg):
     """Load leads file and auto-detect columns."""
     if file.name.endswith(".csv"):
         df = pd.read_csv(file)
     else:
-        # Try different header rows for xlsx
-        for header_row in [0, 5, 10, 14]:
-            try:
-                df = pd.read_excel(file, header=header_row)
-                if len(df.columns) > 3 and df.shape[0] > 5:
-                    break
-            except Exception:
-                continue
+        header_row = find_header_row(file, key_col="GRID")
+        df = pd.read_excel(file, header=header_row)
+        # Drop rows where GRID column is empty (Salesforce summary/footer rows)
+        grid_col = next((c for c in df.columns if str(c).strip() == "GRID"), None)
+        if grid_col:
+            df = df[df[grid_col].notna() & (df[grid_col].astype(str).str.strip() != "")].copy()
 
     col_map = {}
     col_map["name"]    = detect_column(df, ["Company / Account", "Account Name", "Name", "company_name", "Företag", "Virksomhed", "Vállalkozás", "Unternehmen"])
-    col_map["phone"]   = detect_column(df, ["Phone", "phone_number", "Telefon", "Telefonnummer"])
+    col_map["phone"]   = detect_column(df, ["Phone", "phone_number", "Telefon", "Telefonnummer", "Mobile"])
     col_map["street"]  = detect_column(df, ["Street", "Address", "address", "Adresse", "Cím"])
-    col_map["city"]    = detect_column(df, ["City", "city", "By", "Stad", "Město", "Város", "Stadt"])
+    col_map["city"]    = detect_column(df, ["City", "city", "By", "Stad", "Město", "Város", "Stadt", "Restaurant City"])
     col_map["grid"]    = detect_column(df, ["GRID", "grid", "Grid"])
     col_map["lead_id"] = detect_column(df, ["Lead ID", "lead_id", "LeadID", "ID"])
     col_map["url"]     = detect_column(df, ["GOOGLE URL", "Google URL", "google_url", "URL"])
@@ -215,13 +225,11 @@ def load_crm(file, market_cfg):
     if file.name.endswith(".csv"):
         df = pd.read_csv(file)
     else:
-        for header_row in [0, 5, 10, 14]:
-            try:
-                df = pd.read_excel(file, header=header_row, skipfooter=2)
-                if len(df.columns) > 3 and df.shape[0] > 5:
-                    break
-            except Exception:
-                continue
+        header_row = find_header_row(file, key_col="GRID")
+        df = pd.read_excel(file, header=header_row)
+        grid_col = next((c for c in df.columns if str(c).strip() == "GRID"), None)
+        if grid_col:
+            df = df[df[grid_col].notna() & (df[grid_col].astype(str).str.strip() != "")].copy()
 
     col_map = {}
     col_map["grid"]   = detect_column(df, ["GRID__c", "GRID", "Grid"])
@@ -1027,6 +1035,17 @@ def main():
                 ]].head(10)
                 st.dataframe(preview, hide_index=True, use_container_width=True)
 
+                # Copy all URLs box
+                valid_urls = [u for u in urls if u]
+                st.markdown(f"**All URLs ({len(valid_urls)}) — select all and copy into Apify**")
+                st.caption("Click inside the box → Ctrl+A (Win) / Cmd+A (Mac) → Copy")
+                st.text_area(
+                    label="urls",
+                    value="\n".join(valid_urls),
+                    height=200,
+                    label_visibility="collapsed",
+                )
+
                 # Download as CSV
                 csv_buf = io.StringIO()
                 url_leads_df.to_csv(csv_buf, index=False)
@@ -1040,9 +1059,9 @@ def main():
 
                 st.info(
                     "**Next steps:**\n"
-                    "1. Download the CSV above\n"
+                    "1. Copy the URLs above or download the CSV\n"
                     "2. Open Apify → Google Maps Extractor\n"
-                    "3. Paste the URLs from the GOOGLE URL column as input\n"
+                    "3. Paste the URLs as input\n"
                     "4. Run the actor and download the results CSV\n"
                     "5. Come back to the **Classify leads** tab and upload it"
                 )
