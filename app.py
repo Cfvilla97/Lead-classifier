@@ -277,13 +277,29 @@ def norm_url(u):
     return unquote(str(u).strip()).split("?hl=")[0].lower()
 
 
+# Generic words that appear in many business names — strip before token matching
+# so "Pizzeria X" vs "Pizzeria Y" doesn't score high just because of shared generic words
+_GENERIC_NAME_TOKENS = {
+    "restaurant", "cafe", "pizza", "kebab", "kebap", "bar", "grill", "ristorante",
+    "bistro", "house", "shop", "the", "and", "di", "da", "de", "le", "la", "al",
+    "asian", "chinese", "italian", "mexican", "thai", "indian", "pizzeria",
+    "gasthaus", "gasthof", "wirtshaus", "kafe", "lokanta", "restoran",
+}
+
+
 def name_confidence(a, b, char_map):
     a = norm_name(a, char_map)
     b = norm_name(b, char_map)
     if not a or not b:
         return 0.0
-    tokens_a = set(re.split(r"\W+", a)) - {""}
-    tokens_b = set(re.split(r"\W+", b)) - {""}
+
+    raw_a = set(re.split(r"\W+", a)) - {""}
+    raw_b = set(re.split(r"\W+", b)) - {""}
+
+    # Strip generic tokens for token matching, fall back to full set if nothing remains
+    tokens_a = raw_a - _GENERIC_NAME_TOKENS or raw_a
+    tokens_b = raw_b - _GENERIC_NAME_TOKENS or raw_b
+
     if not tokens_a or not tokens_b:
         return 0.0
     shorter = tokens_a if len(tokens_a) <= len(tokens_b) else tokens_b
@@ -506,12 +522,24 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
 
         # ── CRM duplicate check ────────────────────────────────────
         crm_match    = crm_phone_dict.get(phone) if phone else None
-        match_method = "Phone" if crm_match is not None else ""
+        match_method = ""
+
+        if crm_match is not None:
+            # Phone matched — cross-check name to catch recycled phone numbers
+            # Threshold 0.45: loose enough for spelling variants, strict enough to reject different businesses
+            crm_name_for_check = crm_match.get(col_map_crm.get("name", ""), "")
+            phone_name_score   = name_confidence(lead_name, crm_name_for_check, char_map)
+            if phone_name_score >= 0.45:
+                match_method = f"Phone + Name {phone_name_score:.2f}"
+            else:
+                # Names too different — likely recycled/reassigned phone number, not a duplicate
+                crm_match    = None
+
         if crm_match is None:
             nn = norm_name(lead_name, char_map)
             crm_match = crm_name_dict.get(nn) if nn else None
             if crm_match is not None:
-                match_method = "Name"
+                match_method = "Name (exact)"
 
         label = dup_grid = dup_name = dup_status = dup_reason = dup_method = ""
         if crm_match is not None:
