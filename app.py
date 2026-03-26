@@ -1373,15 +1373,49 @@ def main():
             st.success(f"Threshold: {confidence_threshold:.2f} (recommended)")
 
         st.divider()
-        st.subheader("About")
-        st.caption(
-            "Classifies leads into:\n"
-            "- ✅ Qualified / Convert\n"
-            "- 🔴 Duplicate\n"
-            "- 🟡 Business Closed\n"
-            "- 🟠 Wrong Target Group\n"
-            "- ⚫ Invalid Data"
-        )
+        st.subheader("How it works")
+        st.markdown("""
+**Labels applied in this order:**
+
+✅ **Qualified / Convert**
+Not in CRM · confirmed on Google · food-delivery category · business open
+
+🔴 **Duplicate**
+Already exists in Salesforce — matched by phone, name and city
+
+🟡 **Possible Duplicate**
+Phone matched CRM but name looks different — check manually
+
+🟡 **Business Closed**
+Google shows permanently or temporarily closed
+
+🟠 **Wrong Target Group**
+Google category is not food-delivery eligible (hotel, hair salon, gym etc.)
+
+⚫ **Invalid Data**
+Not found on Google or confidence score too low
+""")
+
+        st.divider()
+        st.subheader("Duplicate logic")
+        st.markdown("""
+Three checks run in order — all require city to be compatible:
+
+**1. Phone + Name + City**
+Phone found in CRM → name similarity ≥ 0.45 → same city → Duplicate
+
+**2. Name + City**
+Exact name AND exact city both match CRM → Duplicate
+
+**3. Name only**
+Exact name matches CRM → city compatible or CRM has no city stored → Duplicate
+
+**City check**
+Districts are resolved to their city automatically — e.g. Södermalm → Stockholm, Kadıköy → Istanbul, Floridsdorf → Wien.
+
+**Confidence score**
+Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads below the threshold you set are marked Invalid Data.
+""")
 
     # ── Tabs ──────────────────────────────────────────────────
     tab_classify, tab_urls = st.tabs(["📊 Classify leads", "🔗 Generate Apify URLs"])
