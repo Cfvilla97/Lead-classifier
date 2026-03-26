@@ -1194,8 +1194,155 @@ def build_excel(df, market_name):
 # STREAMLIT UI
 # ─────────────────────────────────────────────
 def main():
-    st.title("🎯 Lead Classifier")
-    st.caption("Upload your lead file, Apify results and CRM export — get a classified Excel report.")
+    # ── Pandora brand CSS ──────────────────────────────────────
+    st.markdown("""
+    <style>
+    /* ── Fonts & base ── */
+    html, body, [class*="css"] { font-family: Arial, sans-serif; }
+
+    /* ── Top header bar ── */
+    header[data-testid="stHeader"] {
+        background: linear-gradient(90deg, #DF1067 0%, #B8209D 60%, #7C1C6B 100%);
+    }
+
+    /* ── Sidebar ── */
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #7C1C6B 0%, #B8209D 100%);
+    }
+    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stSlider label { color: #FFD6EC !important; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #FFD6EC !important; }
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 { color: #FFFFFF !important; }
+    [data-testid="stSidebar"] .stSelectbox > div > div {
+        background: rgba(255,255,255,0.15) !important;
+        border-color: rgba(255,255,255,0.3) !important;
+        color: #FFFFFF !important;
+    }
+    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.25) !important; }
+    [data-testid="stSidebar"] .stAlert { background: rgba(255,255,255,0.15) !important; }
+
+    /* ── Page title ── */
+    .pandora-title {
+        background: linear-gradient(90deg, #DF1067, #B8209D, #7C1C6B);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-size: 2.4rem;
+        font-weight: 700;
+        margin-bottom: 0.1rem;
+    }
+    .pandora-caption {
+        color: #7A7A7A;
+        font-size: 0.95rem;
+        margin-bottom: 1.2rem;
+    }
+
+    /* ── Tabs ── */
+    [data-testid="stTabs"] button {
+        font-weight: 600;
+        font-size: 0.95rem;
+        color: #B8209D !important;
+    }
+    [data-testid="stTabs"] button[aria-selected="true"] {
+        color: #DF1067 !important;
+        border-bottom: 3px solid #DF1067 !important;
+    }
+
+    /* ── Primary buttons ── */
+    [data-testid="stButton"] > button[kind="primary"] {
+        background: linear-gradient(90deg, #DF1067, #B8209D) !important;
+        border: none !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        padding: 0.5rem 1.5rem !important;
+    }
+    [data-testid="stButton"] > button[kind="primary"]:hover {
+        background: linear-gradient(90deg, #C00055, #9A1885) !important;
+        transform: translateY(-1px);
+    }
+
+    /* ── Download button ── */
+    [data-testid="stDownloadButton"] > button {
+        background: linear-gradient(90deg, #DF1067, #B8209D) !important;
+        border: none !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+        width: 100% !important;
+    }
+    [data-testid="stDownloadButton"] > button:hover {
+        background: linear-gradient(90deg, #C00055, #9A1885) !important;
+    }
+
+    /* ── Link buttons ── */
+    [data-testid="stLinkButton"] > a {
+        background: rgba(223,16,103,0.08) !important;
+        border: 1px solid #DF1067 !important;
+        color: #DF1067 !important;
+        font-weight: 600 !important;
+        border-radius: 6px !important;
+    }
+    [data-testid="stLinkButton"] > a:hover {
+        background: rgba(223,16,103,0.15) !important;
+    }
+
+    /* ── Metric cards ── */
+    [data-testid="stMetric"] {
+        background: #FDF0F6;
+        border: 1px solid #F5C0DC;
+        border-radius: 8px;
+        padding: 0.8rem;
+    }
+    [data-testid="stMetricLabel"] { color: #7C1C6B !important; font-weight: 600 !important; }
+    [data-testid="stMetricValue"] { color: #DF1067 !important; font-weight: 700 !important; }
+
+    /* ── File uploader ── */
+    [data-testid="stFileUploader"] {
+        border: 2px dashed #DD3DC1 !important;
+        border-radius: 10px !important;
+        padding: 0.5rem !important;
+        background: #FDF7FB !important;
+    }
+    [data-testid="stFileUploader"]:hover {
+        border-color: #DF1067 !important;
+        background: #FDF0F6 !important;
+    }
+
+    /* ── Expander ── */
+    [data-testid="stExpander"] summary {
+        background: #FDF0F6 !important;
+        border: 1px solid #F5C0DC !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        color: #7C1C6B !important;
+    }
+    [data-testid="stExpander"] summary:hover { background: #FAE0EF !important; }
+
+    /* ── Success / info / warning alerts ── */
+    [data-testid="stAlert"][data-type="success"] { border-left: 4px solid #DF1067 !important; }
+    [data-testid="stAlert"][data-type="info"]    { border-left: 4px solid #B8209D !important; }
+
+    /* ── Dividers ── */
+    hr { border-color: #F5C0DC !important; }
+
+    /* ── Code blocks ── */
+    code, pre { border-left: 3px solid #DF1067 !important; }
+
+    /* ── Spinner ── */
+    [data-testid="stSpinner"] > div { border-top-color: #DF1067 !important; }
+
+    /* ── Section headers ── */
+    h2, h3 { color: #7C1C6B !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Title ─────────────────────────────────────────────────
+    st.markdown('<p class="pandora-title">🎯 Lead Classifier</p>', unsafe_allow_html=True)
+    st.markdown('<p class="pandora-caption">Upload your lead file, Apify results and CRM export — get a classified Excel report.</p>', unsafe_allow_html=True)
 
     # ── Sidebar: Market selection ──────────────────────────────
     with st.sidebar:
