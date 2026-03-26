@@ -23,6 +23,7 @@ st.set_page_config(
 # ─────────────────────────────────────────────
 MARKETS = {
     "TR": {
+        "code": "TR",
         "name": "Turkey",
         "flag": "🇹🇷",
         "char_map": {
@@ -33,16 +34,18 @@ MARKETS = {
         "phone_prefix": "90",
     },
     "NO": {
+        "code": "NO",
         "name": "Norway",
         "flag": "🇳🇴",
         "char_map": {
-            "Æ": "AE", "Ø": "O", "Å": "A",
-            "æ": "ae", "ø": "o", "å": "a",
+            "Æ": "AE", "Ø": "O", "Å": "A", "Ü": "U", "Ö": "O", "Ä": "A",
+            "æ": "ae", "ø": "o", "å": "a", "ü": "u", "ö": "o", "ä": "a",
         },
         "country_suffix": "Norway",
         "phone_prefix": "47",
     },
     "SE": {
+        "code": "SE",
         "name": "Sweden",
         "flag": "🇸🇪",
         "char_map": {
@@ -53,6 +56,7 @@ MARKETS = {
         "phone_prefix": "46",
     },
     "CZ": {
+        "code": "CZ",
         "name": "Czech Republic",
         "flag": "🇨🇿",
         "char_map": {
@@ -67,6 +71,7 @@ MARKETS = {
         "phone_prefix": "420",
     },
     "HU": {
+        "code": "HU",
         "name": "Hungary",
         "flag": "🇭🇺",
         "char_map": {
@@ -79,6 +84,7 @@ MARKETS = {
         "phone_prefix": "36",
     },
     "AT": {
+        "code": "AT",
         "name": "Austria",
         "flag": "🇦🇹",
         "char_map": {
@@ -398,6 +404,7 @@ def load_crm(file, market_cfg):
     col_map["phone"]  = detect_column(df, ["Phone", "phone"])
     col_map["status"] = detect_column(df, ["Account_Status__c", "Account Status", "AccountStatus"])
     col_map["reason"] = detect_column(df, ["Status_Reason__c", "Status Reason", "StatusReason"])
+    col_map["city"]   = detect_column(df, ["BillingCity", "Restaurant City", "City", "city", "Stad", "By", "Město", "Város", "Stadt"])
 
     phone_col = col_map["phone"]
     if phone_col:
@@ -407,6 +414,12 @@ def load_crm(file, market_cfg):
     char_map = market_cfg["char_map"]
     if name_col:
         df["_name_norm"] = df[name_col].apply(lambda n: norm_name(n, char_map))
+
+    city_col = col_map["city"]
+    if city_col:
+        df["_city_norm"] = df[city_col].apply(lambda c: norm_city(c, char_map))
+    else:
+        df["_city_norm"] = ""
 
     return df, col_map
 
@@ -467,6 +480,193 @@ def generate_google_urls(leads_df, col_map, market_cfg):
     return urls
 
 
+# District → Province mappings per market
+# Handles cases where leads use district names but CRM stores province
+_DISTRICT_MAP = {
+    "TR": {
+        "BESIKTAS":"ISTANBUL","KADIKOY":"ISTANBUL","USKUDAR":"ISTANBUL","BEYOGLU":"ISTANBUL",
+        "SISLI":"ISTANBUL","BAKIRKOY":"ISTANBUL","FATIH":"ISTANBUL","EYUP":"ISTANBUL",
+        "EYUPSULTAN":"ISTANBUL","GAZIOSMANPASA":"ISTANBUL","BAGCILAR":"ISTANBUL",
+        "BAHCELIEVLER":"ISTANBUL","BAYRAMPASA":"ISTANBUL","ESENLER":"ISTANBUL",
+        "GUNGOREN":"ISTANBUL","KUCUKCEKMECE":"ISTANBUL","AVCILAR":"ISTANBUL",
+        "BUYUKCEKMECE":"ISTANBUL","CATALCA":"ISTANBUL","ESENYURT":"ISTANBUL",
+        "ARNAVUTKOY":"ISTANBUL","BASAKSEHIR":"ISTANBUL","BEYLIKDUZU":"ISTANBUL",
+        "SULTANGAZI":"ISTANBUL","ZEYTINBURNU":"ISTANBUL","SARIYER":"ISTANBUL",
+        "BEYKOZ":"ISTANBUL","ADALAR":"ISTANBUL","ATASEHIR":"ISTANBUL",
+        "KARTAL":"ISTANBUL","MALTEPE":"ISTANBUL","PENDIK":"ISTANBUL",
+        "SULTANBEYLI":"ISTANBUL","TUZLA":"ISTANBUL","CEKMEKOY":"ISTANBUL",
+        "SANCAKTEPE":"ISTANBUL","UMRANIYE":"ISTANBUL",
+        "CANKAYA":"ANKARA","KECIOREN":"ANKARA","MAMAK":"ANKARA","YENIMAHALLE":"ANKARA",
+        "ETIMESGUT":"ANKARA","SINCAN":"ANKARA","ALTINDAG":"ANKARA","PURSAKLAR":"ANKARA",
+        "GOLBASI":"ANKARA","AKYURT":"ANKARA","KAZAN":"ANKARA","CUBUK":"ANKARA",
+        "BORNOVA":"IZMIR","BUCA":"IZMIR","KARSIYAKA":"IZMIR","KONAK":"IZMIR",
+        "BAYRAKLI":"IZMIR","GAZIEMIR":"IZMIR","CIGLI":"IZMIR","MENEMEN":"IZMIR",
+        "BERGAMA":"IZMIR","EFELER":"IZMIR","ALSANCAK":"IZMIR",
+        "OSMANGAZI":"BURSA","NILUFER":"BURSA","YILDIRIM":"BURSA","INEGOL":"BURSA",
+        "GEMLIK":"BURSA","MUDANYA":"BURSA",
+        "IZMIT":"KOCAELI","GEBZE":"KOCAELI","DERINCE":"KOCAELI","BASISKELE":"KOCAELI","KARTEPE":"KOCAELI",
+        "MURATPASA":"ANTALYA","KEPEZ":"ANTALYA","KONYAALTI":"ANTALYA","ALANYA":"ANTALYA",
+        "MANAVGAT":"ANTALYA","SERIK":"ANTALYA","KAS":"ANTALYA","KEMER":"ANTALYA",
+        "SEYHAN":"ADANA","YUREGIR":"ADANA","CUKUROVA":"ADANA","KOZAN":"ADANA",
+        "SAHINBEY":"GAZIANTEP","SEHITKAMIL":"GAZIANTEP",
+        "MEZITLI":"MERSIN","YENISEHIR":"MERSIN","TOROSLAR":"MERSIN","AKDENIZ":"MERSIN",
+        "ERDEMLI":"MERSIN","TARSUS":"MERSIN",
+        "ONIKISUBAT":"KAHRAMANMARAS","DULKADIROGLU":"KAHRAMANMARAS",
+        "ATAKUM":"SAMSUN","ILKADIM":"SAMSUN","CANIK":"SAMSUN","BAFRA":"SAMSUN",
+        "KAYAPINAR":"DIYARBAKIR","BAGLAR":"DIYARBAKIR",
+        "BODRUM":"MUGLA","MILAS":"MUGLA","MARMARIS":"MUGLA",
+        "ANTAKYA":"HATAY","DORTYOL":"HATAY",
+        "HENDEK":"SAKARYA","ERENLER":"SAKARYA","KOCAALI":"SAKARYA",
+        "FATSA":"ORDU","ARDESEN":"RIZE","TATVAN":"BITLIS",
+        "ERCIS":"VAN","CUMRA":"KONYA","BEYSEHIR":"KONYA",
+        "BOLVADIN":"AFYONKARAHISAR","EDREMIT":"BALIKESIR","SOMA":"MANISA",
+        "ERBAA":"TOKAT","NIKSAR":"TOKAT","VEZIRKOPRU":"SAMSUN",
+        "SORGUN":"YOZGAT","ELBISTAN":"KAHRAMANMARAS","GONEN":"BALIKESIR",
+    },
+    "NO": {
+        # Oslo districts
+        "FROGNER":"OSLO","GRUNERLOKKA":"OSLO","GRUNERLØKKA":"OSLO","SAGENE":"OSLO",
+        "NORDRE AKER":"OSLO","ST HANSHAUGEN":"OSLO","GAMLE OSLO":"OSLO",
+        "GRONLAND":"OSLO","GRØNLAND":"OSLO","MAJORSTUEN":"OSLO","SENTRUM":"OSLO",
+        "HOLMLIA":"OSLO","ULLERN":"OSLO","VESTRE AKER":"OSLO",
+        "OSTENSJØ":"OSLO","ØSTENSJØ":"OSLO","NORDSTRAND":"OSLO",
+        "SØNDRE NORDSTRAND":"OSLO","SONDRE NORDSTRAND":"OSLO",
+        "BJERKE":"OSLO","GRORUD":"OSLO","STOVNER":"OSLO","ALNA":"OSLO",
+        # Greater Oslo
+        "LØRENSKOG":"LILLESTROM","LORENSKOG":"LILLESTROM",
+        "SKEDSMO":"LILLESTROM","RÆLINGEN":"LILLESTROM","RALINGEN":"LILLESTROM",
+        # Bergen districts
+        "BERGENHUS":"BERGEN","YTREBYGDA":"BERGEN","FANA":"BERGEN",
+        "LAKSEVAG":"BERGEN","LAKSEVAAG":"BERGEN",
+        "ASANE":"BERGEN","ÅSANE":"BERGEN","ARNA":"BERGEN","FYLLINGSDALEN":"BERGEN",
+        # Trondheim
+        "MIDTBYEN":"TRONDHEIM","BYASEN":"TRONDHEIM","HEIMDAL":"TRONDHEIM",
+        # Stavanger
+        "HILLEVAG":"STAVANGER","EIGANES":"STAVANGER","HINNA":"STAVANGER",
+        "TASTA":"STAVANGER","STORHAUG":"STAVANGER",
+    },
+    "SE": {
+        # Stockholm districts
+        "SODERMALM":"STOCKHOLM","SÖDERMALM":"STOCKHOLM",
+        "VASASTAN":"STOCKHOLM","OSTERMALM":"STOCKHOLM","ÖSTERMALM":"STOCKHOLM",
+        "KUNGSHOLMEN":"STOCKHOLM","NORRMALM":"STOCKHOLM","GAMLA STAN":"STOCKHOLM",
+        "BROMMA":"STOCKHOLM","HAGERSTEN":"STOCKHOLM","HÄGERSTEN":"STOCKHOLM",
+        "SKARPNACK":"STOCKHOLM","SKARPNÄCK":"STOCKHOLM","FARSTA":"STOCKHOLM",
+        "ENSKEDE":"STOCKHOLM","ARSTA":"STOCKHOLM","ÅRSTA":"STOCKHOLM",
+        "VANTOR":"STOCKHOLM","VANTÖR":"STOCKHOLM",
+        "SPANGA":"STOCKHOLM","SPÅNGA":"STOCKHOLM","TENSTA":"STOCKHOLM",
+        "RINKEBY":"STOCKHOLM","KISTA":"STOCKHOLM","HUSBY":"STOCKHOLM",
+        # Swedish county names → main city
+        "STOCKHOLMS LAN":"STOCKHOLM","STOCKHOLMS LÄN":"STOCKHOLM",
+        "VASTRA GOTALANDS LAN":"GOTEBORG","VÄSTRA GÖTALANDS LÄN":"GOTEBORG",
+        "SKANE LAN":"MALMO","SKÅNE LÄN":"MALMO",
+        "OSTERGOTLANDS LAN":"LINKOPING","ÖSTERGÖTLANDS LÄN":"LINKOPING",
+        "OREBRO LAN":"OREBRO","ÖREBRO LÄN":"OREBRO",
+        "VASTMANLANDS LAN":"VASTERAS","VÄSTMANLANDS LÄN":"VASTERAS",
+        "GAVLEBORGS LAN":"GAVLE","GÄVLEBORGS LÄN":"GAVLE",
+        "JAMTLANDS LAN":"OSTERSUND","JÄMTLANDS LÄN":"OSTERSUND",
+        "VASTERNORRLANDS LAN":"SUNDSVALL","VÄSTERNORRLANDS LÄN":"SUNDSVALL",
+        "VASTERBOTTENS LAN":"UMEA","VÄSTERBOTTENS LÄN":"UMEA",
+        "NORRBOTTENS LAN":"LULEA","NORRBOTTENS LÄN":"LULEA",
+        "JONKOPINGS LAN":"JONKOPING","JÖNKÖPINGS LÄN":"JONKOPING",
+        "KRONOBERGS LAN":"VAXJO","KRONOBERGS LÄN":"VAXJO",
+        "KALMAR LAN":"KALMAR","KALMAR LÄN":"KALMAR",
+        "GOTLANDS LAN":"VISBY","GOTLANDS LÄN":"VISBY",
+        "BLEKINGE LAN":"KARLSKRONA","BLEKINGE LÄN":"KARLSKRONA",
+        "HALLANDS LAN":"HALMSTAD","HALLANDS LÄN":"HALMSTAD",
+        "VARMLANDS LAN":"KARLSTAD","VÄRMLANDS LÄN":"KARLSTAD",
+        "DALARNAS LAN":"FALUN","DALARNAS LÄN":"FALUN",
+        "SODERMANLANDS LAN":"ESKILSTUNA","SÖDERMANLANDS LÄN":"ESKILSTUNA",
+        # Greater Stockholm municipalities (these appear as their own cities in CRM)
+        "JARFALLA":"JARFALLA","JÄRFÄLLA":"JARFALLA",
+        "LIDINGO":"LIDINGO","LIDINGÖ":"LIDINGO",
+        "SOLLENTUNA":"SOLLENTUNA","UPPLANDS VASBY":"UPPLANDS VASBY",
+        "UPPLANDS VÄSBY":"UPPLANDS VASBY",
+        # Göteborg districts
+        "HISINGEN":"GOTEBORG","MAJORNA":"GOTEBORG","CENTRUM":"GOTEBORG",
+        "ASKIM":"GOTEBORG","FROLUNDA":"GOTEBORG","FRÖLUNDA":"GOTEBORG",
+        "ANGERED":"GOTEBORG",
+    },
+    "AT": {
+        # Vienna districts (Bezirke)
+        "INNERE STADT":"WIEN","LEOPOLDSTADT":"WIEN","LANDSTRASSE":"WIEN",
+        "WIEDEN":"WIEN","MARGARETEN":"WIEN","MARIAHILF":"WIEN",
+        "NEUBAU":"WIEN","JOSEFSTADT":"WIEN","ALSERGRUND":"WIEN",
+        "FAVORITEN":"WIEN","SIMMERING":"WIEN","MEIDLING":"WIEN",
+        "HIETZING":"WIEN","PENZING":"WIEN","RUDOLFSHEIM":"WIEN",
+        "OTTAKRING":"WIEN","HERNALS":"WIEN","WAEHRING":"WIEN","WÄHRING":"WIEN",
+        "DOBLING":"WIEN","DÖBLING":"WIEN","BRIGITTENAU":"WIEN",
+        "FLORIDSDORF":"WIEN","DONAUSTADT":"WIEN","LIESING":"WIEN",
+        # Graz districts
+        "INNENSTADT":"GRAZ","GRIES":"GRAZ","LEND":"GRAZ",
+        "JAKOMINI":"GRAZ","EGGENBERG":"GRAZ","WETZELSDORF":"GRAZ",
+        "LIEBENAU":"GRAZ","PUNTIGAM":"GRAZ","MARIATROST":"GRAZ",
+        # Long Austrian city names — normalise to consistent form
+        "KLAGENFURT AM WÖRTHERSEE":"KLAGENFURT AM WORTHERSEE",
+        "KLAGENFURT":"KLAGENFURT AM WORTHERSEE",
+        "ST. POLTEN":"ST. POLTEN","ST PÖLTEN":"ST. POLTEN","SANKT POLTEN":"ST. POLTEN",
+        "WIENER NEUSTADT":"WIENER NEUSTADT",
+        "WIENER NEUDORF":"WIENER NEUDORF",
+        "TULLN AN DER DONAU":"TULLN AN DER DONAU","TULLN":"TULLN AN DER DONAU",
+        "KREMS AN DER DONAU":"KREMS AN DER DONAU","KREMS":"KREMS AN DER DONAU",
+        "VOSENDORF":"VOSENDORF","VÖSENDORF":"VOSENDORF",
+        "MODLING":"MODLING","MÖDLING":"MODLING",
+    },
+    "CZ": {
+        # Prague districts
+        "PRAHA 1":"PRAHA","PRAHA 2":"PRAHA","PRAHA 3":"PRAHA",
+        "PRAHA 4":"PRAHA","PRAHA 5":"PRAHA","PRAHA 6":"PRAHA",
+        "PRAHA 7":"PRAHA","PRAHA 8":"PRAHA","PRAHA 9":"PRAHA",
+        "PRAGUE 1":"PRAHA","PRAGUE 2":"PRAHA","PRAGUE 3":"PRAHA",
+        "VINOHRADY":"PRAHA","ZIZKOV":"PRAHA","ŽIŽKOV":"PRAHA",
+        "SMICHOV":"PRAHA","SMÍCHOV":"PRAHA","DEJVICE":"PRAHA",
+        "HOLESOVICE":"PRAHA","HOLEŠOVICE":"PRAHA",
+        "KARLIN":"PRAHA","KARLÍN":"PRAHA",
+        "BRNO-STRED":"BRNO","BRNO-STŘED":"BRNO","BRNO MESTO":"BRNO","BRNO MĚSTO":"BRNO",
+    },
+    "HU": {
+        # Budapest districts
+        "PEST":"BUDAPEST","BUDA":"BUDAPEST","OBUDA":"BUDAPEST","ÓBUDA":"BUDAPEST",
+        "UJBUDA":"BUDAPEST","ÚJBUDA":"BUDAPEST",
+        "FERENCVAROS":"BUDAPEST","FERENCVÁROS":"BUDAPEST",
+        "KOBANYA":"BUDAPEST","KŐBÁNYA":"BUDAPEST",
+        "ZUGLO":"BUDAPEST","ZUGLÓ":"BUDAPEST",
+        "UJPEST":"BUDAPEST","ÚJPEST":"BUDAPEST",
+        "ANGYALFOLD":"BUDAPEST","ANGYALFÖLD":"BUDAPEST",
+        "I. KERULET":"BUDAPEST","II. KERULET":"BUDAPEST","III. KERULET":"BUDAPEST",
+        "IV. KERULET":"BUDAPEST","V. KERULET":"BUDAPEST","VI. KERULET":"BUDAPEST",
+        "VII. KERULET":"BUDAPEST","VIII. KERULET":"BUDAPEST","IX. KERULET":"BUDAPEST",
+        "X. KERULET":"BUDAPEST","XI. KERULET":"BUDAPEST","XII. KERULET":"BUDAPEST",
+        "XIII. KERULET":"BUDAPEST","XIV. KERULET":"BUDAPEST","XV. KERULET":"BUDAPEST",
+        "XVI. KERULET":"BUDAPEST","XVII. KERULET":"BUDAPEST","XVIII. KERULET":"BUDAPEST",
+        "XIX. KERULET":"BUDAPEST","XX. KERULET":"BUDAPEST","XXI. KERULET":"BUDAPEST",
+        "XXII. KERULET":"BUDAPEST","XXIII. KERULET":"BUDAPEST",
+    },
+}
+
+
+def norm_city(s, char_map, market_code=""):
+    """Normalise city name and resolve district → province for the given market."""
+    if pd.isna(s) or not str(s).strip():
+        return ""
+    s = str(s).strip()
+    for k, v in char_map.items():
+        s = s.replace(k, v)
+    s = re.sub(r"\s+(OD|MERKEZ|DISTRICT|ILCE)$", "", s, flags=re.IGNORECASE)
+    s = s.upper().strip()
+    district_map = _DISTRICT_MAP.get(market_code.upper(), {})
+    return district_map.get(s, s)
+
+
+def cities_compatible(city_a, city_b):
+    """Return True if cities are the same, or either is unknown/blank (can't rule out)."""
+    a = str(city_a).strip().upper()
+    b = str(city_b).strip().upper()
+    if not a or not b or a in ("UNKNOWN", "NAN") or b in ("UNKNOWN", "NAN"):
+        return True   # can't verify — don't block
+    return a == b
+
+
 def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
                    apify_df, col_map_apify, market_cfg,
                    confidence_threshold=0.5):
@@ -475,8 +675,9 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
     prefix   = market_cfg["phone_prefix"]
 
     # ── Build CRM lookups ──────────────────────────────────────────
-    crm_phone_dict = {}
-    crm_name_dict  = {}
+    crm_phone_dict     = {}
+    crm_name_city_dict = {}   # key: (name_norm, city_norm) — most precise
+    crm_name_dict      = {}   # key: name_norm — fallback when CRM city is blank
 
     if crm_df is not None:
         phone_col  = col_map_crm.get("phone")
@@ -489,9 +690,15 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             pn = r.get("_phone_norm", "")
             if pn and pn not in crm_phone_dict:
                 crm_phone_dict[pn] = r
-            nn = r.get("_name_norm", "")
-            if nn and nn not in crm_name_dict:
-                crm_name_dict[nn] = r
+            nn   = r.get("_name_norm", "")
+            city = r.get("_city_norm", "")
+            if nn:
+                if city:
+                    key = (nn, city)
+                    if key not in crm_name_city_dict:
+                        crm_name_city_dict[key] = r
+                if nn not in crm_name_dict:
+                    crm_name_dict[nn] = r
 
     # ── Build Apify lookup ─────────────────────────────────────────
     apify_dict = {}
@@ -511,8 +718,9 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
     results = []
     for _, row in leads_df.iterrows():
         phone = norm_phone(row.get(phone_col_l, ""), prefix) if phone_col_l else ""
-        lead_name = row.get(name_col_l, "") if name_col_l else ""
+        lead_name   = row.get(name_col_l, "") if name_col_l else ""
         lead_street = row.get(street_col_l, "") if street_col_l else ""
+        lead_city   = norm_city(row.get(city_col_l, ""), char_map, market_cfg.get("code", ""))
 
         # URL key: use explicit URL column if present, otherwise reconstruct from name+street
         # (matches what the URL generator tab produces and what Apify searchPageUrl contains)
@@ -526,34 +734,52 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             url = norm_url("https://www.google.com/maps/search/" + _quote(parts)) if parts else ""
 
         # ── CRM duplicate check ────────────────────────────────────
-        crm_match    = crm_phone_dict.get(phone) if phone else None
+        crm_match    = None
         match_method = ""
 
-        if crm_match is not None:
-            # Phone matched — cross-check name to catch recycled phone numbers
-            # Threshold 0.45: loose enough for spelling variants, strict enough to reject different businesses
-            crm_name_for_check = crm_match.get(col_map_crm.get("name", ""), "")
-            phone_name_score   = name_confidence(lead_name, crm_name_for_check, char_map)
-            if phone_name_score >= 0.45:
-                match_method = f"Phone + Name {phone_name_score:.2f}"
-            else:
-                # Names too different — likely recycled/reassigned phone number, not a duplicate
-                crm_match    = None
+        # 1. Phone match + name cross-check + city check
+        if phone:
+            candidate = crm_phone_dict.get(phone)
+            if candidate is not None:
+                crm_name_for_check = candidate.get(col_map_crm.get("name", ""), "")
+                phone_name_score   = name_confidence(lead_name, crm_name_for_check, char_map)
+                crm_cand_city      = candidate.get("_city_norm", "")
+                city_ok            = cities_compatible(lead_city, crm_cand_city)
+                if phone_name_score >= 0.45 and city_ok:
+                    crm_match    = candidate
+                    match_method = f"Phone + Name {phone_name_score:.2f}"
+                # If city mismatch with good name score — silently skip (recycled number or wrong city)
 
+        # 2. Exact name + city match (most precise)
         if crm_match is None:
             nn = norm_name(lead_name, char_map)
-            crm_match = crm_name_dict.get(nn) if nn else None
-            if crm_match is not None:
-                match_method = "Name (exact)"
+            if nn and lead_city:
+                candidate = crm_name_city_dict.get((nn, lead_city))
+                if candidate is not None:
+                    crm_match    = candidate
+                    match_method = "Name + City (exact)"
 
-        label = dup_grid = dup_name = dup_status = dup_reason = dup_method = ""
+        # 3. Exact name only — verify city is compatible
+        if crm_match is None:
+            nn = norm_name(lead_name, char_map)
+            if nn:
+                candidate = crm_name_dict.get(nn)
+                if candidate is not None:
+                    crm_cand_city = candidate.get("_city_norm", "")
+                    city_ok       = cities_compatible(lead_city, crm_cand_city)
+                    if city_ok:
+                        crm_match    = candidate
+                        match_method = "Name (exact)" if crm_cand_city else "Name (exact, city unverified)"
+
+        label = dup_grid = dup_name = dup_crm_city = dup_status = dup_reason = dup_method = ""
         if crm_match is not None:
-            label      = "Duplicate"
-            dup_grid   = str(crm_match.get(col_map_crm.get("grid", ""), ""))
-            dup_name   = str(crm_match.get(col_map_crm.get("name", ""), ""))
-            dup_status = str(crm_match.get(col_map_crm.get("status", ""), ""))
-            dup_reason = str(crm_match.get(col_map_crm.get("reason", ""), "") or "")
-            dup_method = match_method
+            label        = "Duplicate"
+            dup_grid     = str(crm_match.get(col_map_crm.get("grid", ""), ""))
+            dup_name     = str(crm_match.get(col_map_crm.get("name", ""), ""))
+            dup_crm_city = str(crm_match.get(col_map_crm.get("city", ""), "") or "")
+            dup_status   = str(crm_match.get(col_map_crm.get("status", ""), ""))
+            dup_reason   = str(crm_match.get(col_map_crm.get("reason", ""), "") or "")
+            dup_method   = match_method
 
         # ── Apify enrichment + validation ─────────────────────────
         apy = apify_dict.get(url) if url else None
@@ -625,6 +851,7 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             "Label":                 label,
             "Duplicate GRID":        dup_grid,
             "Duplicate CRM Name":    dup_name,
+            "Duplicate CRM City":    dup_crm_city,
             "CRM Account Status":    dup_status,
             "CRM Status Reason":     dup_reason,
             "Duplicate Match Method":dup_method,
@@ -707,11 +934,15 @@ def build_excel(df, market_name):
     DATA_S = 5
     DATA_E = DATA_S + len(df) - 1
 
+    # Col positions (1-based): GRID=1, Lead ID=2, Company=3, City=4, Street=5, Phone=6,
+    # GM Title=7, GM Cat=8, GM BizStatus=9, GM Phone=10, GM Website=11, GM URL=12,
+    # Match Conf=13, Match Reason=14, Label=15,
+    # Dup GRID=16, Dup CRM Name=17, Dup CRM City=18, CRM Status=19, CRM Reason=20, Method=21
     LBL_R  = f"'Classified Leads'!O{DATA_S}:O{DATA_E}"
     CAT_R  = f"'Classified Leads'!H{DATA_S}:H{DATA_E}"
     CITY_R = f"'Classified Leads'!D{DATA_S}:D{DATA_E}"
-    CRMS_R = f"'Classified Leads'!Q{DATA_S}:Q{DATA_E}"
-    METH_R = f"'Classified Leads'!T{DATA_S}:T{DATA_E}"
+    CRMS_R = f"'Classified Leads'!S{DATA_S}:S{DATA_E}"
+    METH_R = f"'Classified Leads'!U{DATA_S}:U{DATA_E}"
 
     col_headers = [
         "GRID", "Lead ID", "Company / Account", "City", "Street", "Phone",
@@ -719,7 +950,8 @@ def build_excel(df, market_name):
         "GM Phone", "GM Website", "GM URL",
         "Match Confidence", "Match Reason",
         "Label",
-        "Duplicate GRID", "Duplicate CRM Name", "CRM Account Status", "CRM Status Reason",
+        "Duplicate GRID", "Duplicate CRM Name", "Duplicate CRM City",
+        "CRM Account Status", "CRM Status Reason",
         "Duplicate Match Method",
     ]
 
@@ -728,13 +960,13 @@ def build_excel(df, market_name):
     ws1.title = "Classified Leads"
     ws1["A1"] = f"Lead Classification Report  |  {market_name}"
     ws1["A1"].font = Font(name="Arial", bold=True, size=14, color="1F4E79")
-    ws1.merge_cells("A1:T1")
+    ws1.merge_cells("A1:U1")
     ws1["A2"] = "Total: {:,}   |   {}".format(
         len(df),
         "   ".join(f"{l}: {counts.get(l, 0):,}" for l in labels_order),
     )
     ws1["A2"].font = Font(name="Arial", italic=True, size=9, color="595959")
-    ws1.merge_cells("A2:T2")
+    ws1.merge_cells("A2:U2")
 
     for ci, h in enumerate(col_headers, 1):
         hdr(ws1, 4, ci, h)
@@ -772,11 +1004,11 @@ def build_excel(df, market_name):
                 c.fill = fill
                 c.alignment = Alignment(vertical="center")
 
-    col_widths = [10, 18, 32, 14, 36, 16, 30, 24, 18, 16, 30, 50, 14, 38, 22, 14, 30, 16, 18, 16]
+    col_widths = [10, 18, 32, 14, 36, 16, 30, 24, 18, 16, 30, 50, 14, 38, 22, 14, 30, 14, 16, 18, 18]
     for i, w in enumerate(col_widths, 1):
         ws1.column_dimensions[get_column_letter(i)].width = w
     ws1.freeze_panes = "A5"
-    ws1.auto_filter.ref = f"A4:T{DATA_E}"
+    ws1.auto_filter.ref = f"A4:U{DATA_E}"
 
     # ── Sheet 2: Summary ─────────────────────────────────────────
     ws2 = wb.create_sheet("Summary")
@@ -895,7 +1127,8 @@ def build_excel(df, market_name):
     ws4["A1"].font = Font(name="Arial", bold=True, size=13, color="9C0006")
     ws4.merge_cells("A1:L1")
     d_heads = ["GRID", "Lead ID", "Company / Account", "City", "Phone",
-               "Duplicate GRID", "Duplicate CRM Name", "CRM Account Status", "CRM Status Reason",
+               "Duplicate GRID", "Duplicate CRM Name", "Duplicate CRM City",
+               "CRM Account Status", "CRM Status Reason",
                "Duplicate Match Method", "GM Category", "GM Business Status"]
     for ci, h in enumerate(d_heads, 1):
         hdr(ws4, 3, ci, h)
@@ -907,7 +1140,7 @@ def build_excel(df, market_name):
             c = ws4.cell(row=ri, column=ci, value=str(val) if val != "" else "")
             c.font = Font(name="Arial", size=10, color="9C0006")
             c.fill = fill; c.border = thin(); c.alignment = Alignment(vertical="center")
-    for i, w in enumerate([10, 18, 32, 14, 16, 14, 30, 16, 18, 16, 24, 18], 1):
+    for i, w in enumerate([10, 18, 32, 14, 16, 14, 30, 14, 16, 18, 18, 24, 18], 1):
         ws4.column_dimensions[get_column_letter(i)].width = w
     ws4.freeze_panes = "A4"
     ws4.auto_filter.ref = f"A3:L{3 + len(d_df)}"
@@ -1157,10 +1390,15 @@ def main():
             c5.metric("⚫ Invalid Data",   counts.get("Invalid Data", 0))
 
             if crm_df is not None:
-                dup_df = result_df[result_df["Label"] == "Duplicate"]
+                dup_df      = result_df[result_df["Label"] == "Duplicate"]
+                dup_methods = dup_df["Duplicate Match Method"].value_counts()
+                phone_n     = sum(v for k, v in dup_methods.items() if "Phone" in str(k))
+                name_city_n = dup_methods.get("Name + City (exact)", 0)
+                name_only_n = sum(v for k, v in dup_methods.items() if "Name" in str(k) and "Phone" not in str(k)) - name_city_n
                 st.caption(
-                    f"Duplicates: {dup_df['Duplicate Match Method'].value_counts().get('Phone', 0)} by phone  ·  "
-                    f"{dup_df['Duplicate Match Method'].value_counts().get('Name', 0)} by exact name"
+                    f"Duplicates: {phone_n} by phone  ·  "
+                    f"{name_city_n} by name + city  ·  "
+                    f"{name_only_n} by name only"
                 )
 
             # ── Download button ────────────────────────────────
