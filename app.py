@@ -2,11 +2,16 @@ import streamlit as st
 import pandas as pd
 import re
 import io
-from urllib.parse import unquote, quote
+import time
+import json
+from urllib.parse import unquote, quote, urlencode
+from urllib.request import urlopen
 from difflib import SequenceMatcher
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from shapely.wkt import loads as wkt_loads
+from shapely.geometry import Point
 
 # ─────────────────────────────────────────────
 # PAGE CONFIG
@@ -381,6 +386,7 @@ def load_leads(file, market_cfg):
     col_map["url"]     = detect_column(df, ["GOOGLE URL", "Google URL", "google_url", "URL"])
     col_map["lat"]     = detect_column(df, ["Coordinates (Latitude)", "Latitude", "lat"])
     col_map["lng"]     = detect_column(df, ["Coordinates (Longitude)", "Longitude", "lng"])
+    col_map["zip"]     = detect_column(df, ["Zip/Postal Code", "Zip", "postal_code", "PostalCode", "Postnummer", "PSČ", "Irányítószám", "PLZ", "Postinummer"])
 
     return df, col_map
 
@@ -667,9 +673,183 @@ def cities_compatible(city_a, city_b):
     return a == b
 
 
+def load_zones(file=None, market_code=None):
+    """
+    Load delivery zone polygons. Two modes:
+    1. Built-in: pass market_code ('NO' or 'TR') to load bundled zone file.
+    2. Custom upload: pass a file object (CSV or XLSX) with WKT column.
+    Returns a list of dicts: {polygon, zone_name, city_name, zone_id}
+    WKT format: POLYGON ((lng lat, ...)) — longitude first, latitude second.
+    """
+    import os
+
+    def _parse_df(df):
+        zones = []
+        wkt_col   = next((c for c in df.columns if "wkt" in str(c).lower()), None)
+        zname_col = next((c for c in df.columns if "zone_name" in str(c).lower()), None)
+        cname_col = next((c for c in df.columns if "city_name" in str(c).lower()), None)
+        zid_col   = next((c for c in df.columns if "zone_id"   in str(c).lower()), None)
+        if not wkt_col:
+            return zones
+        for _, row in df.iterrows():
+            wkt_str = str(row.get(wkt_col, "")).strip()
+            if not wkt_str or wkt_str.lower() == "nan":
+                continue
+            try:
+                polygon = wkt_loads(wkt_str)
+                zones.append({
+                    "polygon":   polygon,
+                    "zone_name": str(row.get(zname_col, "")) if zname_col else "",
+                    "city_name": str(row.get(cname_col, "")) if cname_col else "",
+                    "zone_id":   str(row.get(zid_col,   "")) if zid_col   else "",
+                })
+            except Exception:
+                continue
+        return zones
+
+    # ── Custom upload takes priority ──────────────────────────
+    if file is not None:
+        try:
+            df = pd.read_csv(file) if file.name.endswith(".csv") else pd.read_excel(file)
+            return _parse_df(df)
+        except Exception:
+            return []
+
+    # ── Built-in bundled zones ─────────────────────────────────
+    if market_code in ("NO", "TR"):
+        # Look for the JSON file next to app.py
+        base_dir  = os.path.dirname(os.path.abspath(__file__))
+        json_path = os.path.join(base_dir, f"zones_{market_code}.json")
+        if os.path.exists(json_path):
+            try:
+                with open(json_path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                zones = []
+                for z in raw:
+                    try:
+                        zones.append({
+                            "polygon":   wkt_loads(z["wkt"]),
+                            "zone_name": z.get("zone_name", ""),
+                            "city_name": z.get("city_name", ""),
+                            "zone_id":   z.get("zone_id",   ""),
+                        })
+                    except Exception:
+                        continue
+                return zones
+            except Exception:
+                return []
+
+    return []
+
+
+def geocode_address(street, city, postal_code, country_suffix, cache={}):
+    """
+    Geocode a street address using Nominatim (free, no API key).
+    Returns (lat, lng) or (None, None).
+    Caches results to avoid re-fetching identical addresses.
+    Respects Nominatim's 1 req/sec rate limit.
+    """
+    key = f"{street}|{city}|{postal_code}|{country_suffix}"
+    if key in cache:
+        return cache[key]
+
+    parts = [p for p in [street, postal_code, city, country_suffix] if p and str(p).strip() and str(p).strip() != "nan"]
+    if not parts:
+        cache[key] = (None, None)
+        return (None, None)
+
+    query = ", ".join(str(p).strip() for p in parts)
+    params = urlencode({"q": query, "format": "json", "limit": "1"})
+    url    = f"https://nominatim.openstreetmap.org/search?{params}"
+    headers = {"User-Agent": "LeadClassifier/1.0"}
+
+    try:
+        time.sleep(1.1)  # Nominatim rate limit: 1 req/sec
+        from urllib.request import Request
+        req  = Request(url, headers=headers)
+        resp = urlopen(req, timeout=5)
+        data = json.loads(resp.read().decode())
+        if data:
+            lat = float(data[0]["lat"])
+            lng = float(data[0]["lon"])
+            cache[key] = (lat, lng)
+            return (lat, lng)
+    except Exception:
+        pass
+
+    cache[key] = (None, None)
+    return (None, None)
+
+
+def point_in_zones(lat, lng, zones):
+    """
+    Check if (lat, lng) falls inside any zone polygon.
+    WKT uses (lng lat) order so we create Point(lng, lat).
+    Returns (zone_name, city_name) of the first matching zone, or (None, None).
+    """
+    if lat is None or lng is None:
+        return None, None
+    try:
+        pt = Point(float(lng), float(lat))  # WKT is (lng lat)
+        for z in zones:
+            if z["polygon"].contains(pt):
+                return z["zone_name"], z["city_name"]
+    except Exception:
+        pass
+    return None, None
+
+
+def check_delivery_zone(row, col_map_leads, zones, country_suffix, geocode_enabled=True):
+    """
+    For a single lead row, determine delivery zone status.
+    Returns (status, zone_name, city_name, method_used).
+    Status: 'Within Zone' | 'Outside Zone' | 'No Zone Data' | 'Geocoding Failed'
+    """
+    if not zones:
+        return "No Zone Data", "", "", ""
+
+    lat_col  = col_map_leads.get("lat")
+    lng_col  = col_map_leads.get("lng")
+    str_col  = col_map_leads.get("street")
+    city_col = col_map_leads.get("city")
+    zip_col  = col_map_leads.get("zip")
+
+    # Try coordinates first
+    lat = row.get(lat_col) if lat_col else None
+    lng = row.get(lng_col) if lng_col else None
+    if lat is not None and lng is not None:
+        try:
+            lat, lng = float(lat), float(lng)
+            if not (pd.isna(lat) or pd.isna(lng)):
+                zone_name, city_name = point_in_zones(lat, lng, zones)
+                if zone_name is not None:
+                    return "Within Zone", zone_name, city_name, "Coordinates"
+                else:
+                    return "Outside Zone", "", "", "Coordinates"
+        except (ValueError, TypeError):
+            pass
+
+    # Fall back to geocoding
+    if geocode_enabled:
+        street  = str(row.get(str_col,  "") or "") if str_col  else ""
+        city    = str(row.get(city_col,  "") or "") if city_col else ""
+        postal  = str(row.get(zip_col,   "") or "") if zip_col  else ""
+        if any([street.strip(), city.strip(), postal.strip()]):
+            lat, lng = geocode_address(street, city, postal, country_suffix)
+            if lat is not None:
+                zone_name, city_name = point_in_zones(lat, lng, zones)
+                if zone_name is not None:
+                    return "Within Zone", zone_name, city_name, "Geocoded"
+                else:
+                    return "Outside Zone", "", "", "Geocoded"
+            return "Geocoding Failed", "", "", "Geocoded"
+
+    return "Outside Zone", "", "", "No coordinates"
+
+
 def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
                    apify_df, col_map_apify, market_cfg,
-                   confidence_threshold=0.5):
+                   confidence_threshold=0.5, zones=None, geocode_enabled=True):
     """Main classification pipeline."""
     char_map = market_cfg["char_map"]
     prefix   = market_cfg["phone_prefix"]
@@ -833,6 +1013,15 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             if not label:
                 label = "Invalid Data"
 
+        # ── Delivery zone check ────────────────────────────────
+        zone_status = zone_name = zone_city = zone_method = ""
+        if zones:
+            zone_status, zone_name, zone_city, zone_method = check_delivery_zone(
+                row, col_map_leads, zones,
+                market_cfg.get("country_suffix", ""),
+                geocode_enabled=geocode_enabled,
+            )
+
         results.append({
             "GRID":                  row.get(grid_col_l, "")    if grid_col_l    else "",
             "Lead ID":               row.get(lead_id_col, "")   if lead_id_col   else "",
@@ -855,6 +1044,10 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
             "CRM Account Status":    dup_status,
             "CRM Status Reason":     dup_reason,
             "Duplicate Match Method":dup_method,
+            "Delivery Zone Status":  zone_status,
+            "Zone Name":             zone_name,
+            "Zone City":             zone_city,
+            "Zone Method":           zone_method,
         })
 
     return pd.DataFrame(results)
@@ -953,20 +1146,24 @@ def build_excel(df, market_name):
         "Duplicate GRID", "Duplicate CRM Name", "Duplicate CRM City",
         "CRM Account Status", "CRM Status Reason",
         "Duplicate Match Method",
+        "Delivery Zone Status", "Zone Name", "Zone City", "Zone Method",
     ]
+
+    # Check whether zone data is present in this run
+    has_zones = df["Delivery Zone Status"].notna().any() and (df["Delivery Zone Status"] != "").any()
 
     # ── Sheet 1: All leads ───────────────────────────────────────
     ws1 = wb.active
     ws1.title = "Classified Leads"
     ws1["A1"] = f"Lead Classification Report  |  {market_name}"
     ws1["A1"].font = Font(name="Arial", bold=True, size=14, color="1F4E79")
-    ws1.merge_cells("A1:U1")
+    ws1.merge_cells("A1:Y1")
     ws1["A2"] = "Total: {:,}   |   {}".format(
         len(df),
         "   ".join(f"{l}: {counts.get(l, 0):,}" for l in labels_order),
     )
     ws1["A2"].font = Font(name="Arial", italic=True, size=9, color="595959")
-    ws1.merge_cells("A2:U2")
+    ws1.merge_cells("A2:Y2")
 
     for ci, h in enumerate(col_headers, 1):
         hdr(ws1, 4, ci, h)
@@ -999,16 +1196,24 @@ def build_excel(df, market_name):
                 c.font = Font(name="Arial", size=9, color="595959")
                 c.fill = fill
                 c.alignment = Alignment(vertical="center")
+            elif key == "Delivery Zone Status":
+                zone_color  = "276221" if val == "Within Zone" else ("9C0006" if val == "Outside Zone" else "595959")
+                zone_fill   = PatternFill("solid", start_color="C6EFCE") if val == "Within Zone" else \
+                              (PatternFill("solid", start_color="FFC7CE") if val == "Outside Zone" else \
+                               PatternFill("solid", start_color="EFEFEF"))
+                c.font = Font(name="Arial", size=10, bold=True, color=zone_color)
+                c.fill = zone_fill
+                c.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 c.font = Font(name="Arial", size=10)
                 c.fill = fill
                 c.alignment = Alignment(vertical="center")
 
-    col_widths = [10, 18, 32, 14, 36, 16, 30, 24, 18, 16, 30, 50, 14, 38, 22, 14, 30, 14, 16, 18, 18]
+    col_widths = [10, 18, 32, 14, 36, 16, 30, 24, 18, 16, 30, 50, 14, 38, 22, 14, 30, 14, 16, 18, 18, 18, 18, 14, 14]
     for i, w in enumerate(col_widths, 1):
         ws1.column_dimensions[get_column_letter(i)].width = w
     ws1.freeze_panes = "A5"
-    ws1.auto_filter.ref = f"A4:U{DATA_E}"
+    ws1.auto_filter.ref = f"A4:Y{DATA_E}"
 
     # ── Sheet 2: Summary ─────────────────────────────────────────
     ws2 = wb.create_sheet("Summary")
@@ -1080,6 +1285,36 @@ def build_excel(df, market_name):
         dc(ws2, r, 9,  f'=COUNTIFS({LBL_R},"Wrong Target Group",{CITY_R},E{r})', fill=fill)
         dc(ws2, r, 10, f"=SUM(F{r}:I{r})", fill=fill, bold=True)
 
+    # ── Zone summary (only if zone data present) ─────────────────
+    if has_zones:
+        ZONE_R = f"'Classified Leads'!V{DATA_S}:V{DATA_E}"
+        ZN_R   = f"'Classified Leads'!W{DATA_S}:W{DATA_E}"
+        sec(ws2, 28, 1, "DELIVERY ZONE BREAKDOWN", span=3)
+        for ci, h in enumerate(["Zone Status", "Count", "% of Total"], 1):
+            hdr(ws2, 29, ci, h)
+        zone_statuses = [("Within Zone", "276221", "C6EFCE"),
+                         ("Outside Zone", "9C0006", "FFC7CE"),
+                         ("Geocoding Failed", "595959", "D9D9D9"),
+                         ("No Zone Data", "595959", "EFEFEF")]
+        for i, (zs, col, bg) in enumerate(zone_statuses):
+            r    = 30 + i
+            fill = PatternFill("solid", start_color=bg)
+            dc(ws2, r, 1, zs, fill=fill, align="left", bold=True, color=col)
+            dc(ws2, r, 2, f'=COUNTIF({ZONE_R},"{zs}")', fill=fill)
+            dc(ws2, r, 3, f'=IF(B12=0,0,B{r}/B12)', fill=fill, fmt="0.0%")
+
+        # Top zones
+        sec(ws2, 28, 5, "TOP DELIVERY ZONES", span=3)
+        for ci, h in enumerate(["Zone Name", "Within", "Outside"], 5):
+            hdr(ws2, 29, ci, h)
+        top_zones = [z for z in df["Zone Name"].value_counts().head(15).index.tolist() if z and z != ""]
+        for i, zn in enumerate(top_zones):
+            r    = 30 + i
+            fill = PatternFill("solid", start_color="EBF3FB") if i % 2 == 0 else PatternFill("solid", start_color="FFFFFF")
+            dc(ws2, r, 5, zn, fill=fill, bold=True, align="left")
+            dc(ws2, r, 6, f'=COUNTIFS({ZONE_R},"Within Zone",{ZN_R},E{r})', fill=fill)
+            dc(ws2, r, 7, f'=COUNTIFS({ZONE_R},"Outside Zone",{ZN_R},E{r})', fill=fill)
+
     for col, w in zip("ABCDE",  [28, 10, 12, 2, 22]):
         ws2.column_dimensions[col].width = w
     for col, w in zip("FGHIJ",  [14, 12, 12, 12, 10]):
@@ -1090,10 +1325,11 @@ def build_excel(df, market_name):
     q_df = df[df["Label"] == "Qualified / Convert"].reset_index(drop=True)
     ws3["A1"] = f"Qualified / Convert – Sales Ready  ({len(q_df):,} leads)"
     ws3["A1"].font = Font(name="Arial", bold=True, size=13, color="276221")
-    ws3.merge_cells("A1:M1")
+    ws3.merge_cells("A1:Q1")
     q_heads = ["GRID", "Lead ID", "Company / Account", "City", "Street", "Phone",
                "GM Title", "GM Category", "GM Phone", "GM Website", "GM URL",
-               "Match Confidence", "Match Reason"]
+               "Match Confidence", "Match Reason",
+               "Delivery Zone Status", "Zone Name", "Zone City", "Zone Method"]
     for ci, h in enumerate(q_heads, 1):
         hdr(ws3, 3, ci, h)
     for ri, (_, row) in enumerate(q_df.iterrows(), 4):
@@ -1112,13 +1348,20 @@ def build_excel(df, market_name):
             elif key == "Match Reason":
                 c.font = Font(name="Arial", size=9, color="595959")
                 c.fill = fill; c.alignment = Alignment(vertical="center")
+            elif key == "Delivery Zone Status":
+                zone_color = "276221" if val == "Within Zone" else ("9C0006" if val == "Outside Zone" else "595959")
+                zone_fill  = PatternFill("solid", start_color="C6EFCE") if val == "Within Zone" else \
+                             (PatternFill("solid", start_color="FFC7CE") if val == "Outside Zone" else \
+                              PatternFill("solid", start_color="EFEFEF"))
+                c.font = Font(name="Arial", size=10, bold=True, color=zone_color)
+                c.fill = zone_fill; c.alignment = Alignment(horizontal="center", vertical="center")
             else:
                 c.font = Font(name="Arial", size=10)
                 c.fill = fill; c.alignment = Alignment(vertical="center")
-    for i, w in enumerate([10, 18, 32, 14, 36, 16, 30, 24, 16, 30, 50, 14, 38], 1):
+    for i, w in enumerate([10, 18, 32, 14, 36, 16, 30, 24, 16, 30, 50, 14, 38, 18, 18, 14, 14], 1):
         ws3.column_dimensions[get_column_letter(i)].width = w
     ws3.freeze_panes = "A4"
-    ws3.auto_filter.ref = f"A3:M{3 + len(q_df)}"
+    ws3.auto_filter.ref = f"A3:Q{3 + len(q_df)}"
 
     # ── Sheet 4: Duplicates ──────────────────────────────────────
     ws4 = wb.create_sheet("🔴 Duplicates")
@@ -1397,7 +1640,21 @@ Not found on Google or confidence score too low
 """)
 
         st.divider()
-        st.subheader("Duplicate logic")
+        st.subheader("Delivery zone check")
+        st.markdown("""
+**Built-in zones:** 🇳🇴 Norway · 🇹🇷 Turkey
+
+Zones load automatically when either market is selected. For other markets, upload a WKT zone file manually.
+
+**How it works:**
+- If the lead has **coordinates** → checked directly against zone polygons
+- If **no coordinates** → address geocoded via OpenStreetMap (street + zip + city), then checked
+- Result: ✅ Within Zone · 🚫 Outside Zone · ⚠️ Geocoding Failed
+
+Zone results appear in the **Classified Leads** and **Qualified** tabs with green/red colour coding.
+
+_Geocoding uses Nominatim (free, no API key) at 1 req/sec. Disable the toggle for faster runs when most leads have coordinates._
+""")
         st.markdown("""
 Three checks run in order — all require city to be compatible:
 
@@ -1511,6 +1768,38 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
             crm_file = st.file_uploader("Upload Salesforce CRM export (.csv or .xlsx)", type=["csv", "xlsx"], key="crm")
             st.caption("Optional — duplicate check skipped if not uploaded.")
 
+        st.divider()
+        # Check if built-in zones exist for selected market
+        import os as _os
+        _base = _os.path.dirname(_os.path.abspath(__file__))
+        _builtin_path = _os.path.join(_base, f"zones_{market_code}.json")
+        _has_builtin  = _os.path.exists(_builtin_path)
+
+        if _has_builtin:
+            st.markdown(f"**📍 Delivery zones:** Built-in zones for **{market_cfg['flag']} {market_cfg['name']}** loaded automatically.")
+            zone_file = st.file_uploader(
+                "Upload custom zone file to override built-in zones (.csv or .xlsx) — optional",
+                type=["csv", "xlsx"],
+                key="zones",
+                help="Leave empty to use the built-in delivery zones for this market."
+            )
+        else:
+            st.markdown("**📍 Delivery zones:** No built-in zones for this market.")
+            zone_file = st.file_uploader(
+                "Upload delivery zone file (.csv or .xlsx) — optional",
+                type=["csv", "xlsx"],
+                key="zones",
+                help="WKT polygon file from the logistics system. Each row is one delivery zone."
+            )
+            if not zone_file:
+                st.caption("No zone file uploaded — delivery area check will be skipped.")
+
+        geocode_toggle = st.toggle(
+            "Geocode leads without coordinates",
+            value=True,
+            help="Uses OpenStreetMap Nominatim to find lat/lng from street + city + zip when coordinates are missing. Adds ~1 sec per lead. Disable for faster runs."
+        )
+
         if leads_file:
             try:
                 leads_df, col_map_leads = load_leads(leads_file, market_cfg)
@@ -1550,13 +1839,42 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
         st.divider()
 
         if leads_df is not None and st.button("▶ Run classification", type="primary", use_container_width=True):
-            with st.spinner("Classifying leads..."):
+            zones = []
+            if zone_file:
+                # Custom upload overrides built-in
+                with st.spinner("Loading custom delivery zones..."):
+                    zones = load_zones(file=zone_file)
+                if zones:
+                    st.info(f"📍 {len(zones)} zones loaded from uploaded file.")
+                else:
+                    st.warning("Zone file uploaded but no valid polygons found — check the WKT column.")
+            elif _has_builtin:
+                # Use built-in zones for this market
+                with st.spinner(f"Loading built-in zones for {market_cfg['name']}..."):
+                    zones = load_zones(market_code=market_code)
+                if zones:
+                    st.info(f"📍 {len(zones)} built-in delivery zones loaded for {market_cfg['flag']} {market_cfg['name']}.")
+                else:
+                    st.warning("Built-in zone file not found — delivery check skipped.")
+
+            spinner_msg = "Classifying leads..."
+            if zones and geocode_toggle:
+                no_coords = sum(
+                    1 for _, r in leads_df.iterrows()
+                    if (not col_map_leads.get("lat") or pd.isna(r.get(col_map_leads.get("lat", ""), None)))
+                )
+                if no_coords > 0:
+                    spinner_msg = f"Classifying leads (geocoding up to {no_coords} addresses — may take {no_coords}–{no_coords*2}s)..."
+
+            with st.spinner(spinner_msg):
                 result_df = classify_leads(
                     leads_df, col_map_leads,
                     crm_df, col_map_crm,
                     apify_df, col_map_apify,
                     market_cfg,
                     confidence_threshold=confidence_threshold,
+                    zones=zones,
+                    geocode_enabled=geocode_toggle,
                 )
 
             st.success("Done!")
@@ -1569,6 +1887,19 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
             c3.metric("🟡 Business Closed",counts.get("Business Closed", 0))
             c4.metric("🟠 Wrong TG",       counts.get("Wrong Target Group", 0))
             c5.metric("⚫ Invalid Data",   counts.get("Invalid Data", 0))
+
+            # ── Zone metrics (if zone file was used) ───────────
+            if zones:
+                zone_counts = result_df["Delivery Zone Status"].value_counts()
+                within  = zone_counts.get("Within Zone", 0)
+                outside = zone_counts.get("Outside Zone", 0)
+                failed  = zone_counts.get("Geocoding Failed", 0)
+                zc1, zc2, zc3 = st.columns(3)
+                zc1.metric("📍 Within Delivery Zone",  within)
+                zc2.metric("🚫 Outside Delivery Zone", outside)
+                if failed:
+                    zc3.metric("⚠️ Geocoding Failed", failed,
+                               help="Address could not be geocoded — coordinates and address may be missing or too vague.")
 
             if crm_df is not None:
                 dup_df      = result_df[result_df["Label"] == "Duplicate"]
