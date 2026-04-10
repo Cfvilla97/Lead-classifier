@@ -783,14 +783,13 @@ def load_zones(file=None, market_code=None):
 
 def geocode_address(street, city, postal_code, country_suffix, cache={}):
     """
-    Geocode a street address using Nominatim (free, no API key).
-    Returns (lat, lng) or (None, None).
-    Caches results to avoid re-fetching identical addresses.
-    Respects Nominatim's 1 req/sec rate limit.
+    Geocode a street address. Tries Photon (OSM-based, no key needed) first,
+    falls back to Nominatim. Both are free with no API key required.
 
     Handles Salesforce exports where Street may contain the full address
     (e.g. "Storgatan 5, 123 45 Stockholm, Sweden") or the "EMEA" country
     placeholder instead of the actual country name.
+    Swedish/Nordic postal codes have a space (e.g. "595 33") — handled.
     """
     key = f"{street}|{city}|{postal_code}|{country_suffix}"
     if key in cache:
@@ -800,28 +799,24 @@ def geocode_address(street, city, postal_code, country_suffix, cache={}):
 
     # ── Clean the street field ──────────────────────────────
     street_clean = str(street).strip() if street and str(street).strip() not in ("", "nan") else ""
-
-    # Remove Salesforce "EMEA" country placeholder
     street_clean = _re.sub(r',?\s*EMEA\b', '', street_clean).strip().rstrip(',').strip()
 
-    if not street_clean:
+    if not street_clean and not city:
         cache[key] = (None, None)
         return (None, None)
 
-    # Detect if street is already a full address:
-    # has a postal code (4-6 digits) AND a recognisable country/city name
-    _known = ["sweden", "norway", "turkey", "austria", "czech", "hungary",
-              "sverige", "norge", "türkiye"]
-    has_postal   = bool(_re.search(r'\b\d{4,6}\b', street_clean))
-    has_country  = any(k in street_clean.lower() for k in _known)
+    # Detect self-contained address: postal code (may have space: "595 33")
+    # and a known country name already in the street field
+    has_postal  = bool(_re.search(r'\b\d{3}\s?\d{2}\b|\b\d{4,5}\b', street_clean))
+    _known      = ["sweden", "norway", "turkey", "austria", "czech", "hungary",
+                   "sverige", "norge", "türkiye"]
+    has_country = any(k in street_clean.lower() for k in _known)
     if country_suffix:
         has_country = has_country or country_suffix.lower() in street_clean.lower()
 
     if has_postal and has_country:
-        # Street is self-contained — use it directly
         query = street_clean
     else:
-        # Build from parts, avoid duplicating city already in the street
         city_clean = str(city).strip() if city and str(city).strip() not in ("", "nan") else ""
         zip_clean  = str(postal_code).strip() if postal_code and str(postal_code).strip() not in ("", "nan") else ""
         if city_clean and city_clean.lower() in street_clean.lower():
@@ -833,14 +828,30 @@ def geocode_address(street, city, postal_code, country_suffix, cache={}):
             return (None, None)
         query = ", ".join(p.strip() for p in parts)
 
-    params = urlencode({"q": query, "format": "json", "limit": "1"})
-    url    = f"https://nominatim.openstreetmap.org/search?{params}"
-    headers = {"User-Agent": "LeadClassifier/1.0"}
+    time.sleep(1.1)  # rate limit
 
+    # ── Try Photon first (more permissive with shared IPs) ──
     try:
-        time.sleep(1.1)  # Nominatim rate limit: 1 req/sec
         from urllib.request import Request
-        req  = Request(url, headers=headers)
+        photon_url = f"https://photon.komoot.io/api/?q={urlencode({'q': query})}&limit=1"
+        req  = Request(photon_url, headers={"User-Agent": "LeadClassifier/1.0"})
+        resp = urlopen(req, timeout=6)
+        data = json.loads(resp.read().decode())
+        features = data.get("features", [])
+        if features:
+            coords = features[0]["geometry"]["coordinates"]
+            lat, lng = float(coords[1]), float(coords[0])
+            cache[key] = (lat, lng)
+            return (lat, lng)
+    except Exception:
+        pass
+
+    # ── Fallback: Nominatim ─────────────────────────────────
+    try:
+        from urllib.request import Request
+        params = urlencode({"q": query, "format": "json", "limit": "1"})
+        nom_url = f"https://nominatim.openstreetmap.org/search?{params}"
+        req  = Request(nom_url, headers={"User-Agent": "LeadClassifier/1.0"})
         resp = urlopen(req, timeout=6)
         data = json.loads(resp.read().decode())
         if data:
