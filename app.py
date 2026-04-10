@@ -1328,27 +1328,27 @@ def build_excel(df, market_name):
     if has_zones:
         ZONE_R = f"'Classified Leads'!V{DATA_S}:V{DATA_E}"
         ZN_R   = f"'Classified Leads'!W{DATA_S}:W{DATA_E}"
-        sec(ws2, 28, 1, "DELIVERY ZONE BREAKDOWN", span=3)
+        sec(ws2, 47, 1, "DELIVERY ZONE BREAKDOWN", span=3)
         for ci, h in enumerate(["Zone Status", "Count", "% of Total"], 1):
-            hdr(ws2, 29, ci, h)
+            hdr(ws2, 48, ci, h)
         zone_statuses = [("Within Zone", "276221", "C6EFCE"),
                          ("Outside Zone", "9C0006", "FFC7CE"),
                          ("Geocoding Failed", "595959", "D9D9D9"),
                          ("No Zone Data", "595959", "EFEFEF")]
         for i, (zs, col, bg) in enumerate(zone_statuses):
-            r    = 30 + i
+            r    = 49 + i
             fill = PatternFill("solid", start_color=bg)
             dc(ws2, r, 1, zs, fill=fill, align="left", bold=True, color=col)
             dc(ws2, r, 2, f'=COUNTIF({ZONE_R},"{zs}")', fill=fill)
             dc(ws2, r, 3, f'=IF(B12=0,0,B{r}/B12)', fill=fill, fmt="0.0%")
 
         # Top zones
-        sec(ws2, 28, 5, "TOP DELIVERY ZONES", span=3)
+        sec(ws2, 47, 5, "TOP DELIVERY ZONES", span=3)
         for ci, h in enumerate(["Zone Name", "Within", "Outside"], 5):
-            hdr(ws2, 29, ci, h)
+            hdr(ws2, 48, ci, h)
         top_zones = [z for z in df["Zone Name"].value_counts().head(15).index.tolist() if z and z != ""]
         for i, zn in enumerate(top_zones):
-            r    = 30 + i
+            r    = 49 + i
             fill = PatternFill("solid", start_color="EBF3FB") if i % 2 == 0 else PatternFill("solid", start_color="FFFFFF")
             dc(ws2, r, 5, zn, fill=fill, bold=True, align="left")
             dc(ws2, r, 6, f'=COUNTIFS({ZONE_R},"Within Zone",{ZN_R},E{r})', fill=fill)
