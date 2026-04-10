@@ -1440,146 +1440,228 @@ def main():
     # ── Pandora brand CSS ──────────────────────────────────────
     st.markdown("""
     <style>
-    /* ── Fonts & base ── */
-    html, body, [class*="css"] { font-family: Arial, sans-serif; }
+    /* ── Base ── */
+    html, body, [class*="css"] {
+        font-family: Arial, sans-serif;
+    }
 
-    /* ── Top header bar ── */
+    /* ── Top header bar — subtle pink strip ── */
     header[data-testid="stHeader"] {
-        background: linear-gradient(90deg, #DF1067 0%, #B8209D 60%, #7C1C6B 100%);
+        background: #FFFFFF;
+        border-bottom: 3px solid #DF1067;
     }
 
-    /* ── Sidebar ── */
+    /* ── Sidebar — clean white with pink left border ── */
     [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #7C1C6B 0%, #B8209D 100%);
+        background: #FAFAFA;
+        border-right: 3px solid #DF1067;
     }
-    [data-testid="stSidebar"] * { color: #FFFFFF !important; }
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stSlider label { color: #FFD6EC !important; }
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #FFD6EC !important; }
+    [data-testid="stSidebar"] * { color: #1A1A1A !important; }
     [data-testid="stSidebar"] h1,
     [data-testid="stSidebar"] h2,
-    [data-testid="stSidebar"] h3 { color: #FFFFFF !important; }
-    [data-testid="stSidebar"] .stSelectbox > div > div {
-        background: rgba(255,255,255,0.15) !important;
-        border-color: rgba(255,255,255,0.3) !important;
-        color: #FFFFFF !important;
+    [data-testid="stSidebar"] h3 {
+        color: #DF1067 !important;
+        font-weight: 700 !important;
     }
-    [data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.25) !important; }
-    [data-testid="stSidebar"] .stAlert { background: rgba(255,255,255,0.15) !important; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #444444 !important;
+        font-size: 0.88rem !important;
+        line-height: 1.55 !important;
+    }
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stSlider label {
+        color: #333333 !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stSidebar"] .stSelectbox > div > div {
+        background: #FFFFFF !important;
+        border: 1.5px solid #E0E0E0 !important;
+        border-radius: 6px !important;
+        color: #1A1A1A !important;
+    }
+    [data-testid="stSidebar"] .stSelectbox > div > div:focus-within {
+        border-color: #DF1067 !important;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: #EBEBEB !important;
+        margin: 0.8rem 0 !important;
+    }
 
     /* ── Page title ── */
     .pandora-title {
-        background: linear-gradient(90deg, #DF1067, #B8209D, #7C1C6B);
+        background: linear-gradient(90deg, #DF1067, #B8209D);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
-        font-size: 2.4rem;
+        font-size: 2.2rem;
         font-weight: 700;
-        margin-bottom: 0.1rem;
+        margin-bottom: 0;
+        line-height: 1.2;
     }
     .pandora-caption {
-        color: #7A7A7A;
-        font-size: 0.95rem;
-        margin-bottom: 1.2rem;
+        color: #888888;
+        font-size: 0.92rem;
+        margin-top: 0.2rem;
+        margin-bottom: 1.4rem;
     }
 
     /* ── Tabs ── */
     [data-testid="stTabs"] button {
         font-weight: 600;
-        font-size: 0.95rem;
-        color: #B8209D !important;
+        font-size: 0.92rem;
+        color: #666666 !important;
+        border-radius: 0 !important;
+        padding-bottom: 0.6rem !important;
+    }
+    [data-testid="stTabs"] button:hover {
+        color: #DF1067 !important;
+        background: transparent !important;
     }
     [data-testid="stTabs"] button[aria-selected="true"] {
         color: #DF1067 !important;
         border-bottom: 3px solid #DF1067 !important;
+        background: transparent !important;
     }
 
-    /* ── Primary buttons ── */
+    /* ── Primary run button ── */
     [data-testid="stButton"] > button[kind="primary"] {
-        background: linear-gradient(90deg, #DF1067, #B8209D) !important;
+        background: #DF1067 !important;
         border: none !important;
         color: white !important;
         font-weight: 600 !important;
-        border-radius: 6px !important;
-        padding: 0.5rem 1.5rem !important;
+        font-size: 1rem !important;
+        border-radius: 8px !important;
+        padding: 0.6rem 1.5rem !important;
+        letter-spacing: 0.01em !important;
+        transition: background 0.15s ease !important;
     }
     [data-testid="stButton"] > button[kind="primary"]:hover {
-        background: linear-gradient(90deg, #C00055, #9A1885) !important;
-        transform: translateY(-1px);
+        background: #C00055 !important;
     }
 
     /* ── Download button ── */
     [data-testid="stDownloadButton"] > button {
-        background: linear-gradient(90deg, #DF1067, #B8209D) !important;
+        background: #DF1067 !important;
         border: none !important;
         color: white !important;
         font-weight: 600 !important;
-        border-radius: 6px !important;
+        border-radius: 8px !important;
         width: 100% !important;
     }
     [data-testid="stDownloadButton"] > button:hover {
-        background: linear-gradient(90deg, #C00055, #9A1885) !important;
+        background: #C00055 !important;
     }
 
-    /* ── Link buttons ── */
+    /* ── Link buttons — outlined style ── */
     [data-testid="stLinkButton"] > a {
-        background: rgba(223,16,103,0.08) !important;
-        border: 1px solid #DF1067 !important;
+        background: #FFFFFF !important;
+        border: 1.5px solid #DF1067 !important;
         color: #DF1067 !important;
         font-weight: 600 !important;
         border-radius: 6px !important;
+        font-size: 0.88rem !important;
     }
     [data-testid="stLinkButton"] > a:hover {
-        background: rgba(223,16,103,0.15) !important;
+        background: #FFF0F5 !important;
     }
 
-    /* ── Metric cards ── */
+    /* ── Metric cards — clean white with subtle border ── */
     [data-testid="stMetric"] {
-        background: #FDF0F6;
-        border: 1px solid #F5C0DC;
+        background: #FFFFFF;
+        border: 1px solid #EBEBEB;
+        border-top: 3px solid #DF1067;
         border-radius: 8px;
-        padding: 0.8rem;
+        padding: 0.9rem 1rem;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
-    [data-testid="stMetricLabel"] { color: #7C1C6B !important; font-weight: 600 !important; }
-    [data-testid="stMetricValue"] { color: #DF1067 !important; font-weight: 700 !important; }
+    [data-testid="stMetricLabel"] {
+        color: #555555 !important;
+        font-weight: 600 !important;
+        font-size: 0.82rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.04em !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #1A1A1A !important;
+        font-weight: 700 !important;
+        font-size: 1.8rem !important;
+    }
 
-    /* ── File uploader ── */
+    /* ── File uploader — clean minimal style ── */
     [data-testid="stFileUploader"] {
-        border: 2px dashed #DD3DC1 !important;
+        border: 2px dashed #D0D0D0 !important;
         border-radius: 10px !important;
-        padding: 0.5rem !important;
-        background: #FDF7FB !important;
+        background: #FAFAFA !important;
+        transition: border-color 0.15s ease !important;
     }
     [data-testid="stFileUploader"]:hover {
         border-color: #DF1067 !important;
-        background: #FDF0F6 !important;
+        background: #FFF8FB !important;
     }
 
-    /* ── Expander ── */
+    /* ── Expander / help section ── */
     [data-testid="stExpander"] summary {
-        background: #FDF0F6 !important;
-        border: 1px solid #F5C0DC !important;
-        border-radius: 8px !important;
+        background: #FFFFFF !important;
+        border: 1px solid #E8E8E8 !important;
+        border-left: 3px solid #DF1067 !important;
+        border-radius: 6px !important;
         font-weight: 600 !important;
-        color: #7C1C6B !important;
+        color: #333333 !important;
+        font-size: 0.9rem !important;
     }
-    [data-testid="stExpander"] summary:hover { background: #FAE0EF !important; }
+    [data-testid="stExpander"] summary:hover {
+        background: #FFF8FB !important;
+        border-left-color: #B8209D !important;
+    }
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+        border: 1px solid #E8E8E8 !important;
+        border-top: none !important;
+        border-radius: 0 0 6px 6px !important;
+        background: #FFFFFF !important;
+    }
 
-    /* ── Success / info / warning alerts ── */
-    [data-testid="stAlert"][data-type="success"] { border-left: 4px solid #DF1067 !important; }
-    [data-testid="stAlert"][data-type="info"]    { border-left: 4px solid #B8209D !important; }
+    /* ── Alerts ── */
+    [data-testid="stAlert"][data-type="success"] {
+        background: #F6FFF9 !important;
+        border-left: 4px solid #2E7D32 !important;
+        color: #1B5E20 !important;
+    }
+    [data-testid="stAlert"][data-type="info"] {
+        background: #F5F5FF !important;
+        border-left: 4px solid #DF1067 !important;
+    }
+    [data-testid="stAlert"][data-type="warning"] {
+        background: #FFFBF0 !important;
+        border-left: 4px solid #F59E0B !important;
+    }
 
     /* ── Dividers ── */
-    hr { border-color: #F5C0DC !important; }
+    hr { border-color: #EBEBEB !important; }
 
-    /* ── Code blocks ── */
-    code, pre { border-left: 3px solid #DF1067 !important; }
+    /* ── Toggle ── */
+    [data-testid="stToggle"] span[data-checked="true"] {
+        background: #DF1067 !important;
+    }
 
     /* ── Spinner ── */
     [data-testid="stSpinner"] > div { border-top-color: #DF1067 !important; }
 
-    /* ── Section headers ── */
-    h2, h3 { color: #7C1C6B !important; }
+    /* ── Section headers in main area ── */
+    .main h2 { color: #1A1A1A !important; font-size: 1.1rem !important; font-weight: 700 !important; }
+    .main h3 { color: #444444 !important; font-size: 0.95rem !important; font-weight: 600 !important; }
+
+    /* ── Caption / small text ── */
+    [data-testid="stCaptionContainer"] { color: #888888 !important; font-size: 0.82rem !important; }
+
+    /* ── Info box for zone status ── */
+    .zone-badge-within  { display:inline-block; background:#E8F5E9; color:#2E7D32; border-radius:4px; padding:2px 8px; font-weight:600; font-size:0.85rem; }
+    .zone-badge-outside { display:inline-block; background:#FFEBEE; color:#C62828; border-radius:4px; padding:2px 8px; font-weight:600; font-size:0.85rem; }
+
+    /* ── Selectbox focus ── */
+    [data-baseweb="select"] > div:focus-within { border-color: #DF1067 !important; }
+
+    /* ── Slider ── */
+    [data-testid="stSlider"] [data-testid="stThumbValue"] { color: #DF1067 !important; }
     </style>
     """, unsafe_allow_html=True)
 
