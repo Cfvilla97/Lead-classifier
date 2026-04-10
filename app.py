@@ -787,17 +787,52 @@ def geocode_address(street, city, postal_code, country_suffix, cache={}):
     Returns (lat, lng) or (None, None).
     Caches results to avoid re-fetching identical addresses.
     Respects Nominatim's 1 req/sec rate limit.
+
+    Handles Salesforce exports where Street may contain the full address
+    (e.g. "Storgatan 5, 123 45 Stockholm, Sweden") or the "EMEA" country
+    placeholder instead of the actual country name.
     """
     key = f"{street}|{city}|{postal_code}|{country_suffix}"
     if key in cache:
         return cache[key]
 
-    parts = [p for p in [street, postal_code, city, country_suffix] if p and str(p).strip() and str(p).strip() != "nan"]
-    if not parts:
+    import re as _re
+
+    # ── Clean the street field ──────────────────────────────
+    street_clean = str(street).strip() if street and str(street).strip() not in ("", "nan") else ""
+
+    # Remove Salesforce "EMEA" country placeholder
+    street_clean = _re.sub(r',?\s*EMEA\b', '', street_clean).strip().rstrip(',').strip()
+
+    if not street_clean:
         cache[key] = (None, None)
         return (None, None)
 
-    query = ", ".join(str(p).strip() for p in parts)
+    # Detect if street is already a full address:
+    # has a postal code (4-6 digits) AND a recognisable country/city name
+    _known = ["sweden", "norway", "turkey", "austria", "czech", "hungary",
+              "sverige", "norge", "türkiye"]
+    has_postal   = bool(_re.search(r'\b\d{4,6}\b', street_clean))
+    has_country  = any(k in street_clean.lower() for k in _known)
+    if country_suffix:
+        has_country = has_country or country_suffix.lower() in street_clean.lower()
+
+    if has_postal and has_country:
+        # Street is self-contained — use it directly
+        query = street_clean
+    else:
+        # Build from parts, avoid duplicating city already in the street
+        city_clean = str(city).strip() if city and str(city).strip() not in ("", "nan") else ""
+        zip_clean  = str(postal_code).strip() if postal_code and str(postal_code).strip() not in ("", "nan") else ""
+        if city_clean and city_clean.lower() in street_clean.lower():
+            city_clean = ""
+        parts = [p for p in [street_clean, zip_clean, city_clean, country_suffix]
+                 if p and p.strip() and p.strip() != "nan"]
+        if not parts:
+            cache[key] = (None, None)
+            return (None, None)
+        query = ", ".join(p.strip() for p in parts)
+
     params = urlencode({"q": query, "format": "json", "limit": "1"})
     url    = f"https://nominatim.openstreetmap.org/search?{params}"
     headers = {"User-Agent": "LeadClassifier/1.0"}
@@ -806,7 +841,7 @@ def geocode_address(street, city, postal_code, country_suffix, cache={}):
         time.sleep(1.1)  # Nominatim rate limit: 1 req/sec
         from urllib.request import Request
         req  = Request(url, headers=headers)
-        resp = urlopen(req, timeout=5)
+        resp = urlopen(req, timeout=6)
         data = json.loads(resp.read().decode())
         if data:
             lat = float(data[0]["lat"])
