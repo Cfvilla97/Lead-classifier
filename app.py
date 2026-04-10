@@ -716,7 +716,7 @@ def load_zones(file=None, market_code=None):
             return []
 
     # ── Built-in bundled zones ─────────────────────────────────
-    if market_code in ("NO", "TR"):
+    if market_code in ("NO", "TR", "SE"):
         # Look for the JSON file next to app.py
         base_dir  = os.path.dirname(os.path.abspath(__file__))
         json_path = os.path.join(base_dir, f"zones_{market_code}.json")
@@ -1642,7 +1642,7 @@ Not found on Google or confidence score too low
         st.divider()
         st.subheader("Delivery zone check")
         st.markdown("""
-**Built-in zones:** 🇳🇴 Norway · 🇹🇷 Turkey
+**Built-in zones:** 🇳🇴 Norway · 🇹🇷 Turkey · 🇸🇪 Sweden
 
 Zones load automatically when either market is selected. For other markets, upload a WKT zone file manually.
 
