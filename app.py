@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 from shapely.wkt import loads as wkt_loads
 from shapely.geometry import Point
 
@@ -1478,17 +1479,57 @@ def build_excel(df, market_name):
     rev_df = df[df["Label"].isin(["Business Closed", "Wrong Target Group", "Invalid Data"])].reset_index(drop=True)
     ws5["A1"] = f"Needs Review  ({len(rev_df):,} leads)"
     ws5["A1"].font = Font(name="Arial", bold=True, size=13, color="7D4E00")
-    ws5.merge_cells("A1:M1")
-    r_heads = ["GRID", "Lead ID", "Company / Account", "City", "Phone",
-               "Label", "GM Title", "GM Category", "GM Business Status",
-               "GM Phone", "Match Confidence", "Match Reason", "GM URL"]
+
+    # SE gets an extra manual check dropdown column at position D
+    _is_se = "SE" in market_name.upper() or "Sweden" in market_name or "🇸🇪" in market_name
+    if _is_se:
+        ws5.merge_cells("A1:N1")
+        r_heads = ["GRID", "Lead ID", "Company / Account", "Manual Check",
+                   "City", "Phone", "Label", "GM Title", "GM Category",
+                   "GM Business Status", "GM Phone", "Match Confidence",
+                   "Match Reason", "GM URL"]
+        _manual_opts = [
+            "Potential Leads", "Wrong Target Group", "Duplicate",
+            "Not a restaurant", "Closed Down", "Missing info of restaurant",
+            "Operational Hours", "Outside DA", "KAM", "Shop",
+        ]
+        _dv = DataValidation(
+            type="list",
+            formula1='"' + ",".join(_manual_opts) + '"',
+            allow_blank=True,
+            showDropDown=False,
+            showErrorMessage=False,
+        )
+        ws5.add_data_validation(_dv)
+    else:
+        ws5.merge_cells("A1:M1")
+        r_heads = ["GRID", "Lead ID", "Company / Account", "City", "Phone",
+                   "Label", "GM Title", "GM Category", "GM Business Status",
+                   "GM Phone", "Match Confidence", "Match Reason", "GM URL"]
+
     for ci, h in enumerate(r_heads, 1):
         hdr(ws5, 3, ci, h)
+
+    # Purple header for the Manual Check column
+    if _is_se:
+        mc_ci = r_heads.index("Manual Check") + 1
+        mc_cell = ws5.cell(row=3, column=mc_ci)
+        mc_cell.fill = PatternFill("solid", start_color="7C1C6B")
+        mc_cell.font = Font(name="Arial", bold=True, size=10, color="FFFFFF")
+        mc_cell.alignment = Alignment(horizontal="center", vertical="center")
+
     for ri, (_, row) in enumerate(rev_df.iterrows(), 4):
         lbl  = row["Label"]
         fill = FILLS.get(lbl, PatternFill()) if ri % 2 == 0 else ALT_FILLS.get(lbl, PatternFill())
         lc   = LABEL_COLORS.get(lbl, "000000")
         for ci, key in enumerate(r_heads, 1):
+            if key == "Manual Check":
+                c = ws5.cell(row=ri, column=ci, value="")
+                c.border = thin()
+                c.fill = PatternFill("solid", start_color="F3E5F5") if ri % 2 == 0 else PatternFill("solid", start_color="FAF3FF")
+                c.alignment = Alignment(horizontal="center", vertical="center")
+                _dv.add(c)
+                continue
             val = row.get(key, "")
             if pd.isna(val): val = ""
             c = ws5.cell(row=ri, column=ci, value=val if val != "" else "")
@@ -1507,10 +1548,17 @@ def build_excel(df, market_name):
             else:
                 c.font = Font(name="Arial", size=10)
                 c.fill = fill; c.alignment = Alignment(vertical="center")
-    for i, w in enumerate([10, 18, 32, 14, 16, 22, 30, 24, 18, 16, 14, 38, 50], 1):
-        ws5.column_dimensions[get_column_letter(i)].width = w
-    ws5.freeze_panes = "A4"
-    ws5.auto_filter.ref = f"A3:M{3 + len(rev_df)}"
+
+    if _is_se:
+        for i, w in enumerate([10, 18, 32, 22, 14, 16, 22, 30, 24, 18, 16, 14, 38, 50], 1):
+            ws5.column_dimensions[get_column_letter(i)].width = w
+        ws5.freeze_panes = "A4"
+        ws5.auto_filter.ref = f"A3:N{3 + len(rev_df)}"
+    else:
+        for i, w in enumerate([10, 18, 32, 14, 16, 22, 30, 24, 18, 16, 14, 38, 50], 1):
+            ws5.column_dimensions[get_column_letter(i)].width = w
+        ws5.freeze_panes = "A4"
+        ws5.auto_filter.ref = f"A3:M{3 + len(rev_df)}"
 
     buf = io.BytesIO()
     wb.save(buf)
