@@ -423,7 +423,7 @@ def load_leads(file, market_cfg):
     col_map["city"]    = detect_column(df, ["City", "city", "By", "Stad", "Město", "Város", "Stadt", "Restaurant City"])
     col_map["grid"]    = detect_column(df, ["GRID", "grid", "Grid"])
     col_map["lead_id"] = detect_column(df, ["Lead ID", "lead_id", "LeadID", "ID"])
-    col_map["url"]     = detect_column(df, ["GOOGLE URL", "Google URL", "google_url", "URL"])
+    col_map["url"]     = detect_column(df, ["GOOGLE URL", "Google URL", "google_url", "URL", "Website", "website"])
     col_map["lat"]     = detect_column(df, ["Coordinates (Latitude)", "Latitude", "lat"])
     col_map["lng"]     = detect_column(df, ["Coordinates (Longitude)", "Longitude", "lng"])
     col_map["zip"]     = detect_column(df, ["Zip/Postal Code", "Zip", "postal_code", "PostalCode", "Postnummer", "PSČ", "Irányítószám", "PLZ", "Postinummer"])
@@ -471,7 +471,11 @@ def load_crm(file, market_cfg):
 
 
 def load_apify(file):
-    """Load Apify results file."""
+    """Load Apify results file.
+    Supports two URL matching modes:
+    1. searchPageUrl column (standard Apify output via Start URLs)
+    2. searchString column containing 'Direct Detail URL: https://...' (alternative Apify export)
+    """
     if file.name.endswith(".csv"):
         df = pd.read_csv(file, low_memory=False)
     else:
@@ -488,32 +492,62 @@ def load_apify(file):
     col_map["temp"]     = detect_column(df, ["temporarilyClosed"])
     col_map["address"]  = detect_column(df, ["address"])
 
-    if col_map["url"]:
+    # ── Build normalised URL for matching ─────────────────────
+    if col_map["url"] and df[col_map["url"]].notna().sum() > 0:
+        # Standard: searchPageUrl is populated
         df["_url_norm"] = df[col_map["url"]].apply(norm_url)
+    else:
+        # Fallback: extract URL from searchString column
+        # Format: "Direct Detail URL: https://..."
+        search_str_col = detect_column(df, ["searchString"])
+        if search_str_col and df[search_str_col].notna().sum() > 0:
+            def _extract_from_search_string(s):
+                if pd.isna(s): return ""
+                s = str(s).strip()
+                if "Direct Detail URL:" in s:
+                    return norm_url(s.replace("Direct Detail URL:", "").strip())
+                return norm_url(s)
+            df["_url_norm"] = df[search_str_col].apply(_extract_from_search_string)
+            col_map["url"]  = search_str_col  # flag that we're using this column
+        elif col_map["gm_url"] and df[col_map["gm_url"]].notna().sum() > 0:
+            # Last resort: use the plain url column
+            df["_url_norm"] = df[col_map["gm_url"]].apply(norm_url)
+            col_map["url"]  = col_map["gm_url"]
 
     return df, col_map
 
 
 def generate_google_urls(leads_df, col_map, market_cfg):
-    """Generate Google Maps search URLs for each lead."""
+    """Generate Google Maps search URLs for each lead.
+    If the lead already has a Website or URL column containing a Google Maps URL,
+    reuse it directly instead of generating a new one.
+    """
     name_col   = col_map.get("name")
     street_col = col_map.get("street")
     lat_col    = col_map.get("lat")
     lng_col    = col_map.get("lng")
+    url_col    = col_map.get("url")
     suffix     = market_cfg["country_suffix"]
 
     urls = []
+    reused = 0
     for _, row in leads_df.iterrows():
         name   = str(row[name_col]).strip()   if name_col   and pd.notna(row.get(name_col))   else ""
         street = str(row[street_col]).strip() if street_col and pd.notna(row.get(street_col)) else ""
         lat    = row.get(lat_col)             if lat_col    else None
         lng    = row.get(lng_col)             if lng_col    else None
 
+        # ── Reuse existing URL if it looks like a Google Maps link ──
+        existing_url = str(row.get(url_col, "") or "") if url_col else ""
+        if existing_url and existing_url not in ("", "nan") and "google.com/maps" in existing_url:
+            urls.append(existing_url.strip())
+            reused += 1
+            continue
+
+        # ── Generate new URL ────────────────────────────────────────
         if lat and lng and pd.notna(lat) and pd.notna(lng):
-            # Coordinate URL (most accurate)
             url = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
         elif name and street:
-            # Name + address URL
             query = quote(f"{name} {street}")
             url = f"https://www.google.com/maps/search/{query}"
         elif name:
@@ -523,7 +557,7 @@ def generate_google_urls(leads_df, col_map, market_cfg):
             url = ""
         urls.append(url)
 
-    return urls
+    return urls, reused
 
 
 # District → Province mappings per market
@@ -1922,7 +1956,41 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
             c1, c2, c3 = st.columns(3)
 
             with c1:
-                st.markdown("**1. CRM export (Salesforce)**")
+                st.markdown("**Step 1 · Leads file (Salesforce)**")
+                st.markdown(
+                    "Open the leads report, change the **Country** and **Lead Source** filters "
+                    "to match your market, then export as CSV or XLSX."
+                )
+                st.link_button(
+                    "Open Leads Report →",
+                    "https://deliveryhero.lightning.force.com/lightning/r/Report/00ObO0000047LqDUAU/view?queryScope=userFolders",
+                    use_container_width=True,
+                )
+
+            with c2:
+                st.markdown("**Step 2 · Apify — Google Maps Extractor**")
+                st.markdown(
+                    "If your leads file already has a **Website column with Google Maps URLs**, "
+                    "paste those directly into Apify as Start URLs. "
+                    "Otherwise use the **URL Generator tab** to create them first."
+                )
+                st.code(
+                    "title, temporarilyClosed, permanentlyClosed,\n"
+                    "postalCode, address, city, street,\n"
+                    "website, phone, phoneUnformatted,\n"
+                    "categoryName, categories, url,\n"
+                    "searchPageUrl, searchString",
+                    language="text",
+                )
+                st.caption("Format: CSV · View: Overview · additionalInfo can be omitted.")
+                st.link_button(
+                    "Open Apify Actor →",
+                    "https://console.apify.com/organization/ofPZhSPCC0KUPtU2Z/actors/nwua9Gu5YrADL7ZDj/input",
+                    use_container_width=True,
+                )
+
+            with c3:
+                st.markdown("**Step 3 · CRM export (Salesforce)**")
                 if _crm_url:
                     st.markdown(
                         f"A dedicated report is set up for **{market_cfg['flag']} {market_cfg['name']}**. "
@@ -1952,38 +2020,6 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
                         "https://chromewebstore.google.com/detail/salesforce-inspector-reloaded/hpijlohoihegkfehhibggnkbjhoemldh",
                         use_container_width=True,
                     )
-
-            with c2:
-                st.markdown("**2. Leads export (Salesforce)**")
-                st.markdown(
-                    "Open the leads report, change the **Country** and **Lead Source** filters "
-                    "to match your market, then export as CSV."
-                )
-                st.link_button(
-                    "Open Leads Report →",
-                    "https://deliveryhero.lightning.force.com/lightning/r/Report/00ObO0000047LqDUAU/view?queryScope=userFolders",
-                    use_container_width=True,
-                )
-
-            with c3:
-                st.markdown("**3. Apify — Google Maps Extractor**")
-                st.markdown(
-                    "Use the **URL generator tab** to create your search URLs first. "
-                    "Paste them into Apify and run. Make sure these fields are selected:"
-                )
-                st.code(
-                    "title, temporarilyClosed, permanentlyClosed,\n"
-                    "postalCode, address, city, street,\n"
-                    "website, phone, phoneUnformatted,\n"
-                    "categoryName, categories, url, searchPageUrl",
-                    language="text",
-                )
-                st.caption("Format: CSV · View: Overview · additionalInfo can be omitted.")
-                st.link_button(
-                    "Open Apify Actor →",
-                    "https://console.apify.com/organization/ofPZhSPCC0KUPtU2Z/actors/nwua9Gu5YrADL7ZDj/input",
-                    use_container_width=True,
-                )
 
         st.divider()
         col1, col2, col3 = st.columns(3)
@@ -2181,11 +2217,16 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
         if url_leads_file:
             try:
                 url_leads_df, url_col_map = load_leads(url_leads_file, market_cfg)
-                urls = generate_google_urls(url_leads_df, url_col_map, market_cfg)
+                urls, reused = generate_google_urls(url_leads_df, url_col_map, market_cfg)
                 url_leads_df["GOOGLE URL"] = urls
 
-                method = "coordinates" if url_col_map.get("lat") else "name + address"
-                st.success(f"{len(urls):,} URLs generated using {method}.")
+                if reused > 0:
+                    method = f"existing Website/URL column ({reused:,} reused, {len(urls)-reused:,} generated)"
+                elif url_col_map.get("lat"):
+                    method = "coordinates"
+                else:
+                    method = "name + address"
+                st.success(f"{len(urls):,} URLs ready — {method}.")
 
                 # Preview
                 preview = url_leads_df[[
