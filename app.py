@@ -417,15 +417,15 @@ def load_leads(file, market_cfg):
             df = df[df[grid_col].astype(str).str.match(r'^[A-Z0-9]{6,}$')].copy()
 
     col_map = {}
-    col_map["name"]    = detect_column(df, ["Company / Account", "Account Name", "Name", "company_name", "Företag", "Virksomhed", "Vállalkozás", "Unternehmen"])
+    col_map["name"]    = detect_column(df, ["Company / Account", "Account Name", "Name", "restaurant_name", "company_name", "Företag", "Virksomhed", "Vállalkozás", "Unternehmen"])
     col_map["phone"]   = detect_column(df, ["Phone", "phone_number", "Telefon", "Telefonnummer", "Mobile"])
-    col_map["street"]  = detect_column(df, ["Street", "Address", "address", "Adresse", "Cím"])
-    col_map["city"]    = detect_column(df, ["City", "city", "By", "Stad", "Město", "Város", "Stadt", "Restaurant City"])
-    col_map["grid"]    = detect_column(df, ["GRID", "grid", "Grid"])
+    col_map["street"]  = detect_column(df, ["Street", "restaurant_address", "Address", "address", "Adresse", "Cím"])
+    col_map["city"]    = detect_column(df, ["City", "restaurant_city", "polygon_city", "city", "By", "Stad", "Město", "Város", "Stadt", "Restaurant City"])
+    col_map["grid"]    = detect_column(df, ["GRID", "grid", "Grid", "lead_id"])
     col_map["lead_id"] = detect_column(df, ["Lead ID", "lead_id", "LeadID", "ID"])
     col_map["url"]     = detect_column(df, ["GOOGLE URL", "Google URL", "google_url", "URL", "Website", "website"])
-    col_map["lat"]     = detect_column(df, ["Coordinates (Latitude)", "Latitude", "lat"])
-    col_map["lng"]     = detect_column(df, ["Coordinates (Longitude)", "Longitude", "lng"])
+    col_map["lat"]     = detect_column(df, ["Coordinates (Latitude)", "restaurant_lat", "Latitude", "lat"])
+    col_map["lng"]     = detect_column(df, ["Coordinates (Longitude)", "restaurant_long", "restaurant_lng", "Longitude", "lng"])
     col_map["zip"]     = detect_column(df, ["Zip/Postal Code", "Zip", "postal_code", "PostalCode", "Postnummer", "PSČ", "Irányítószám", "PLZ", "Postinummer"])
 
     return df, col_map
@@ -521,210 +521,79 @@ def load_apify(file):
 
 def generate_google_urls(leads_df, col_map, market_cfg):
     """Generate Google Maps search URLs for each lead.
-    If the lead already has a Website or URL column containing a Google Maps URL,
-    reuse it directly instead of generating a new one.
+
+    Fallback chain (first match wins):
+    1. Existing Google Maps URL in Website/URL column → reuse as-is
+    2. Coordinates (lat + lng) → most precise query
+    3. Full address in street field (contains city + postal already) → direct query
+    4. Name + street (+ city if not already in street)
+    5. Name + city
+    6. Name + country suffix only
     """
     name_col   = col_map.get("name")
     street_col = col_map.get("street")
+    city_col   = col_map.get("city")
     lat_col    = col_map.get("lat")
     lng_col    = col_map.get("lng")
     url_col    = col_map.get("url")
-    suffix     = market_cfg["country_suffix"]
+    suffix     = market_cfg.get("country_suffix", "")
+
+    import re as _re
+
+    def _is_full_address(s):
+        return bool(_re.search(r'\b\d{3,6}\b', str(s)))
 
     urls = []
     reused = 0
     for _, row in leads_df.iterrows():
         name   = str(row[name_col]).strip()   if name_col   and pd.notna(row.get(name_col))   else ""
         street = str(row[street_col]).strip() if street_col and pd.notna(row.get(street_col)) else ""
+        city   = str(row[city_col]).strip()   if city_col   and pd.notna(row.get(city_col))   else ""
         lat    = row.get(lat_col)             if lat_col    else None
         lng    = row.get(lng_col)             if lng_col    else None
+        try:
+            lat = float(lat) if lat is not None and str(lat) not in ("", "nan") else None
+            lng = float(lng) if lng is not None and str(lng) not in ("", "nan") else None
+        except (ValueError, TypeError):
+            lat = lng = None
 
-        # ── Reuse existing URL if it looks like a Google Maps link ──
-        existing_url = str(row.get(url_col, "") or "") if url_col else ""
-        if existing_url and existing_url not in ("", "nan") and "google.com/maps" in existing_url:
-            urls.append(existing_url.strip())
+        # 1. Reuse existing Google Maps URL
+        existing = str(row.get(url_col, "") or "") if url_col else ""
+        if existing and existing not in ("", "nan") and "google.com/maps" in existing:
+            urls.append(existing.strip())
             reused += 1
             continue
 
-        # ── Generate new URL ────────────────────────────────────────
-        if lat and lng and pd.notna(lat) and pd.notna(lng):
+        # 2. Coordinates
+        if lat and lng:
             url = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+
+        # 3. Full address in street field (e.g. "Mogatan 23, 335 71 Hestra, Sweden")
+        elif street and _is_full_address(street):
+            url = f"https://www.google.com/maps/search/{quote(street)}"
+
+        # 4. Name + street (append city if not already in street)
         elif name and street:
-            query = quote(f"{name} {street}")
-            url = f"https://www.google.com/maps/search/{query}"
+            query = f"{name} {street}"
+            if city and city.lower() not in street.lower():
+                query += f" {city}"
+            url = f"https://www.google.com/maps/search/{quote(query)}"
+
+        # 5. Name + city
+        elif name and city:
+            url = f"https://www.google.com/maps/search/{quote(f'{name} {city}')}"
+
+        # 6. Name + country suffix
         elif name:
-            query = quote(f"{name} {suffix}")
-            url = f"https://www.google.com/maps/search/{query}"
+            url = f"https://www.google.com/maps/search/{quote(f'{name} {suffix}')}"
+
         else:
             url = ""
+
         urls.append(url)
 
     return urls, reused
 
-
-# District → Province mappings per market
-# Handles cases where leads use district names but CRM stores province
-_DISTRICT_MAP = {
-    "TR": {
-        "BESIKTAS":"ISTANBUL","KADIKOY":"ISTANBUL","USKUDAR":"ISTANBUL","BEYOGLU":"ISTANBUL",
-        "SISLI":"ISTANBUL","BAKIRKOY":"ISTANBUL","FATIH":"ISTANBUL","EYUP":"ISTANBUL",
-        "EYUPSULTAN":"ISTANBUL","GAZIOSMANPASA":"ISTANBUL","BAGCILAR":"ISTANBUL",
-        "BAHCELIEVLER":"ISTANBUL","BAYRAMPASA":"ISTANBUL","ESENLER":"ISTANBUL",
-        "GUNGOREN":"ISTANBUL","KUCUKCEKMECE":"ISTANBUL","AVCILAR":"ISTANBUL",
-        "BUYUKCEKMECE":"ISTANBUL","CATALCA":"ISTANBUL","ESENYURT":"ISTANBUL",
-        "ARNAVUTKOY":"ISTANBUL","BASAKSEHIR":"ISTANBUL","BEYLIKDUZU":"ISTANBUL",
-        "SULTANGAZI":"ISTANBUL","ZEYTINBURNU":"ISTANBUL","SARIYER":"ISTANBUL",
-        "BEYKOZ":"ISTANBUL","ADALAR":"ISTANBUL","ATASEHIR":"ISTANBUL",
-        "KARTAL":"ISTANBUL","MALTEPE":"ISTANBUL","PENDIK":"ISTANBUL",
-        "SULTANBEYLI":"ISTANBUL","TUZLA":"ISTANBUL","CEKMEKOY":"ISTANBUL",
-        "SANCAKTEPE":"ISTANBUL","UMRANIYE":"ISTANBUL",
-        "CANKAYA":"ANKARA","KECIOREN":"ANKARA","MAMAK":"ANKARA","YENIMAHALLE":"ANKARA",
-        "ETIMESGUT":"ANKARA","SINCAN":"ANKARA","ALTINDAG":"ANKARA","PURSAKLAR":"ANKARA",
-        "GOLBASI":"ANKARA","AKYURT":"ANKARA","KAZAN":"ANKARA","CUBUK":"ANKARA",
-        "BORNOVA":"IZMIR","BUCA":"IZMIR","KARSIYAKA":"IZMIR","KONAK":"IZMIR",
-        "BAYRAKLI":"IZMIR","GAZIEMIR":"IZMIR","CIGLI":"IZMIR","MENEMEN":"IZMIR",
-        "BERGAMA":"IZMIR","EFELER":"IZMIR","ALSANCAK":"IZMIR",
-        "OSMANGAZI":"BURSA","NILUFER":"BURSA","YILDIRIM":"BURSA","INEGOL":"BURSA",
-        "GEMLIK":"BURSA","MUDANYA":"BURSA",
-        "IZMIT":"KOCAELI","GEBZE":"KOCAELI","DERINCE":"KOCAELI","BASISKELE":"KOCAELI","KARTEPE":"KOCAELI",
-        "MURATPASA":"ANTALYA","KEPEZ":"ANTALYA","KONYAALTI":"ANTALYA","ALANYA":"ANTALYA",
-        "MANAVGAT":"ANTALYA","SERIK":"ANTALYA","KAS":"ANTALYA","KEMER":"ANTALYA",
-        "SEYHAN":"ADANA","YUREGIR":"ADANA","CUKUROVA":"ADANA","KOZAN":"ADANA",
-        "SAHINBEY":"GAZIANTEP","SEHITKAMIL":"GAZIANTEP",
-        "MEZITLI":"MERSIN","YENISEHIR":"MERSIN","TOROSLAR":"MERSIN","AKDENIZ":"MERSIN",
-        "ERDEMLI":"MERSIN","TARSUS":"MERSIN",
-        "ONIKISUBAT":"KAHRAMANMARAS","DULKADIROGLU":"KAHRAMANMARAS",
-        "ATAKUM":"SAMSUN","ILKADIM":"SAMSUN","CANIK":"SAMSUN","BAFRA":"SAMSUN",
-        "KAYAPINAR":"DIYARBAKIR","BAGLAR":"DIYARBAKIR",
-        "BODRUM":"MUGLA","MILAS":"MUGLA","MARMARIS":"MUGLA",
-        "ANTAKYA":"HATAY","DORTYOL":"HATAY",
-        "HENDEK":"SAKARYA","ERENLER":"SAKARYA","KOCAALI":"SAKARYA",
-        "FATSA":"ORDU","ARDESEN":"RIZE","TATVAN":"BITLIS",
-        "ERCIS":"VAN","CUMRA":"KONYA","BEYSEHIR":"KONYA",
-        "BOLVADIN":"AFYONKARAHISAR","EDREMIT":"BALIKESIR","SOMA":"MANISA",
-        "ERBAA":"TOKAT","NIKSAR":"TOKAT","VEZIRKOPRU":"SAMSUN",
-        "SORGUN":"YOZGAT","ELBISTAN":"KAHRAMANMARAS","GONEN":"BALIKESIR",
-    },
-    "NO": {
-        # Oslo districts
-        "FROGNER":"OSLO","GRUNERLOKKA":"OSLO","GRUNERLØKKA":"OSLO","SAGENE":"OSLO",
-        "NORDRE AKER":"OSLO","ST HANSHAUGEN":"OSLO","GAMLE OSLO":"OSLO",
-        "GRONLAND":"OSLO","GRØNLAND":"OSLO","MAJORSTUEN":"OSLO","SENTRUM":"OSLO",
-        "HOLMLIA":"OSLO","ULLERN":"OSLO","VESTRE AKER":"OSLO",
-        "OSTENSJØ":"OSLO","ØSTENSJØ":"OSLO","NORDSTRAND":"OSLO",
-        "SØNDRE NORDSTRAND":"OSLO","SONDRE NORDSTRAND":"OSLO",
-        "BJERKE":"OSLO","GRORUD":"OSLO","STOVNER":"OSLO","ALNA":"OSLO",
-        # Greater Oslo
-        "LØRENSKOG":"LILLESTROM","LORENSKOG":"LILLESTROM",
-        "SKEDSMO":"LILLESTROM","RÆLINGEN":"LILLESTROM","RALINGEN":"LILLESTROM",
-        # Bergen districts
-        "BERGENHUS":"BERGEN","YTREBYGDA":"BERGEN","FANA":"BERGEN",
-        "LAKSEVAG":"BERGEN","LAKSEVAAG":"BERGEN",
-        "ASANE":"BERGEN","ÅSANE":"BERGEN","ARNA":"BERGEN","FYLLINGSDALEN":"BERGEN",
-        # Trondheim
-        "MIDTBYEN":"TRONDHEIM","BYASEN":"TRONDHEIM","HEIMDAL":"TRONDHEIM",
-        # Stavanger
-        "HILLEVAG":"STAVANGER","EIGANES":"STAVANGER","HINNA":"STAVANGER",
-        "TASTA":"STAVANGER","STORHAUG":"STAVANGER",
-    },
-    "SE": {
-        # Stockholm districts
-        "SODERMALM":"STOCKHOLM","SÖDERMALM":"STOCKHOLM",
-        "VASASTAN":"STOCKHOLM","OSTERMALM":"STOCKHOLM","ÖSTERMALM":"STOCKHOLM",
-        "KUNGSHOLMEN":"STOCKHOLM","NORRMALM":"STOCKHOLM","GAMLA STAN":"STOCKHOLM",
-        "BROMMA":"STOCKHOLM","HAGERSTEN":"STOCKHOLM","HÄGERSTEN":"STOCKHOLM",
-        "SKARPNACK":"STOCKHOLM","SKARPNÄCK":"STOCKHOLM","FARSTA":"STOCKHOLM",
-        "ENSKEDE":"STOCKHOLM","ARSTA":"STOCKHOLM","ÅRSTA":"STOCKHOLM",
-        "VANTOR":"STOCKHOLM","VANTÖR":"STOCKHOLM",
-        "SPANGA":"STOCKHOLM","SPÅNGA":"STOCKHOLM","TENSTA":"STOCKHOLM",
-        "RINKEBY":"STOCKHOLM","KISTA":"STOCKHOLM","HUSBY":"STOCKHOLM",
-        # Swedish county names → main city
-        "STOCKHOLMS LAN":"STOCKHOLM","STOCKHOLMS LÄN":"STOCKHOLM",
-        "VASTRA GOTALANDS LAN":"GOTEBORG","VÄSTRA GÖTALANDS LÄN":"GOTEBORG",
-        "SKANE LAN":"MALMO","SKÅNE LÄN":"MALMO",
-        "OSTERGOTLANDS LAN":"LINKOPING","ÖSTERGÖTLANDS LÄN":"LINKOPING",
-        "OREBRO LAN":"OREBRO","ÖREBRO LÄN":"OREBRO",
-        "VASTMANLANDS LAN":"VASTERAS","VÄSTMANLANDS LÄN":"VASTERAS",
-        "GAVLEBORGS LAN":"GAVLE","GÄVLEBORGS LÄN":"GAVLE",
-        "JAMTLANDS LAN":"OSTERSUND","JÄMTLANDS LÄN":"OSTERSUND",
-        "VASTERNORRLANDS LAN":"SUNDSVALL","VÄSTERNORRLANDS LÄN":"SUNDSVALL",
-        "VASTERBOTTENS LAN":"UMEA","VÄSTERBOTTENS LÄN":"UMEA",
-        "NORRBOTTENS LAN":"LULEA","NORRBOTTENS LÄN":"LULEA",
-        "JONKOPINGS LAN":"JONKOPING","JÖNKÖPINGS LÄN":"JONKOPING",
-        "KRONOBERGS LAN":"VAXJO","KRONOBERGS LÄN":"VAXJO",
-        "KALMAR LAN":"KALMAR","KALMAR LÄN":"KALMAR",
-        "GOTLANDS LAN":"VISBY","GOTLANDS LÄN":"VISBY",
-        "BLEKINGE LAN":"KARLSKRONA","BLEKINGE LÄN":"KARLSKRONA",
-        "HALLANDS LAN":"HALMSTAD","HALLANDS LÄN":"HALMSTAD",
-        "VARMLANDS LAN":"KARLSTAD","VÄRMLANDS LÄN":"KARLSTAD",
-        "DALARNAS LAN":"FALUN","DALARNAS LÄN":"FALUN",
-        "SODERMANLANDS LAN":"ESKILSTUNA","SÖDERMANLANDS LÄN":"ESKILSTUNA",
-        # Greater Stockholm municipalities (these appear as their own cities in CRM)
-        "JARFALLA":"JARFALLA","JÄRFÄLLA":"JARFALLA",
-        "LIDINGO":"LIDINGO","LIDINGÖ":"LIDINGO",
-        "SOLLENTUNA":"SOLLENTUNA","UPPLANDS VASBY":"UPPLANDS VASBY",
-        "UPPLANDS VÄSBY":"UPPLANDS VASBY",
-        # Göteborg districts
-        "HISINGEN":"GOTEBORG","MAJORNA":"GOTEBORG","CENTRUM":"GOTEBORG",
-        "ASKIM":"GOTEBORG","FROLUNDA":"GOTEBORG","FRÖLUNDA":"GOTEBORG",
-        "ANGERED":"GOTEBORG",
-    },
-    "AT": {
-        # Vienna districts (Bezirke)
-        "INNERE STADT":"WIEN","LEOPOLDSTADT":"WIEN","LANDSTRASSE":"WIEN",
-        "WIEDEN":"WIEN","MARGARETEN":"WIEN","MARIAHILF":"WIEN",
-        "NEUBAU":"WIEN","JOSEFSTADT":"WIEN","ALSERGRUND":"WIEN",
-        "FAVORITEN":"WIEN","SIMMERING":"WIEN","MEIDLING":"WIEN",
-        "HIETZING":"WIEN","PENZING":"WIEN","RUDOLFSHEIM":"WIEN",
-        "OTTAKRING":"WIEN","HERNALS":"WIEN","WAEHRING":"WIEN","WÄHRING":"WIEN",
-        "DOBLING":"WIEN","DÖBLING":"WIEN","BRIGITTENAU":"WIEN",
-        "FLORIDSDORF":"WIEN","DONAUSTADT":"WIEN","LIESING":"WIEN",
-        # Graz districts
-        "INNENSTADT":"GRAZ","GRIES":"GRAZ","LEND":"GRAZ",
-        "JAKOMINI":"GRAZ","EGGENBERG":"GRAZ","WETZELSDORF":"GRAZ",
-        "LIEBENAU":"GRAZ","PUNTIGAM":"GRAZ","MARIATROST":"GRAZ",
-        # Long Austrian city names — normalise to consistent form
-        "KLAGENFURT AM WÖRTHERSEE":"KLAGENFURT AM WORTHERSEE",
-        "KLAGENFURT":"KLAGENFURT AM WORTHERSEE",
-        "ST. POLTEN":"ST. POLTEN","ST PÖLTEN":"ST. POLTEN","SANKT POLTEN":"ST. POLTEN",
-        "WIENER NEUSTADT":"WIENER NEUSTADT",
-        "WIENER NEUDORF":"WIENER NEUDORF",
-        "TULLN AN DER DONAU":"TULLN AN DER DONAU","TULLN":"TULLN AN DER DONAU",
-        "KREMS AN DER DONAU":"KREMS AN DER DONAU","KREMS":"KREMS AN DER DONAU",
-        "VOSENDORF":"VOSENDORF","VÖSENDORF":"VOSENDORF",
-        "MODLING":"MODLING","MÖDLING":"MODLING",
-    },
-    "CZ": {
-        # Prague districts
-        "PRAHA 1":"PRAHA","PRAHA 2":"PRAHA","PRAHA 3":"PRAHA",
-        "PRAHA 4":"PRAHA","PRAHA 5":"PRAHA","PRAHA 6":"PRAHA",
-        "PRAHA 7":"PRAHA","PRAHA 8":"PRAHA","PRAHA 9":"PRAHA",
-        "PRAGUE 1":"PRAHA","PRAGUE 2":"PRAHA","PRAGUE 3":"PRAHA",
-        "VINOHRADY":"PRAHA","ZIZKOV":"PRAHA","ŽIŽKOV":"PRAHA",
-        "SMICHOV":"PRAHA","SMÍCHOV":"PRAHA","DEJVICE":"PRAHA",
-        "HOLESOVICE":"PRAHA","HOLEŠOVICE":"PRAHA",
-        "KARLIN":"PRAHA","KARLÍN":"PRAHA",
-        "BRNO-STRED":"BRNO","BRNO-STŘED":"BRNO","BRNO MESTO":"BRNO","BRNO MĚSTO":"BRNO",
-    },
-    "HU": {
-        # Budapest districts
-        "PEST":"BUDAPEST","BUDA":"BUDAPEST","OBUDA":"BUDAPEST","ÓBUDA":"BUDAPEST",
-        "UJBUDA":"BUDAPEST","ÚJBUDA":"BUDAPEST",
-        "FERENCVAROS":"BUDAPEST","FERENCVÁROS":"BUDAPEST",
-        "KOBANYA":"BUDAPEST","KŐBÁNYA":"BUDAPEST",
-        "ZUGLO":"BUDAPEST","ZUGLÓ":"BUDAPEST",
-        "UJPEST":"BUDAPEST","ÚJPEST":"BUDAPEST",
-        "ANGYALFOLD":"BUDAPEST","ANGYALFÖLD":"BUDAPEST",
-        "I. KERULET":"BUDAPEST","II. KERULET":"BUDAPEST","III. KERULET":"BUDAPEST",
-        "IV. KERULET":"BUDAPEST","V. KERULET":"BUDAPEST","VI. KERULET":"BUDAPEST",
-        "VII. KERULET":"BUDAPEST","VIII. KERULET":"BUDAPEST","IX. KERULET":"BUDAPEST",
-        "X. KERULET":"BUDAPEST","XI. KERULET":"BUDAPEST","XII. KERULET":"BUDAPEST",
-        "XIII. KERULET":"BUDAPEST","XIV. KERULET":"BUDAPEST","XV. KERULET":"BUDAPEST",
-        "XVI. KERULET":"BUDAPEST","XVII. KERULET":"BUDAPEST","XVIII. KERULET":"BUDAPEST",
-        "XIX. KERULET":"BUDAPEST","XX. KERULET":"BUDAPEST","XXI. KERULET":"BUDAPEST",
-        "XXII. KERULET":"BUDAPEST","XXIII. KERULET":"BUDAPEST",
-    },
-}
 
 
 def norm_city(s, char_map, market_code=""):
