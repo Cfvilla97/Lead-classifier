@@ -491,6 +491,8 @@ def load_apify(file):
     col_map["perm"]     = detect_column(df, ["permanentlyClosed"])
     col_map["temp"]     = detect_column(df, ["temporarilyClosed"])
     col_map["address"]  = detect_column(df, ["address"])
+    col_map["lat"]      = detect_column(df, ["latitude", "lat"])
+    col_map["lng"]      = detect_column(df, ["longitude", "lng"])
 
     # ── Build normalised URL for matching ─────────────────────
     if col_map["url"] and df[col_map["url"]].notna().sum() > 0:
@@ -745,6 +747,38 @@ def cities_compatible(city_a, city_b):
     if not a or not b or a in ("UNKNOWN", "NAN") or b in ("UNKNOWN", "NAN"):
         return True   # can't verify — don't block
     return a == b
+
+
+def haversine_km(lat1, lng1, lat2, lng2):
+    """Return distance in km between two lat/lng points using Haversine formula."""
+    import math
+    R = 6371.0
+    try:
+        la1, lo1, la2, lo2 = map(math.radians, [float(lat1), float(lng1), float(lat2), float(lng2)])
+        dlat = la2 - la1
+        dlng = lo2 - lo1
+        a = math.sin(dlat/2)**2 + math.cos(la1) * math.cos(la2) * math.sin(dlng/2)**2
+        return R * 2 * math.asin(math.sqrt(a))
+    except Exception:
+        return None
+
+
+def street_similarity(street_a, street_b, char_map):
+    """Compare two street strings — strip house numbers and normalise."""
+    import re as _re
+    def _norm(s):
+        if not s or str(s).strip() in ("", "nan"): return ""
+        s = str(s).upper().strip()
+        for src, tgt in char_map.items():
+            s = s.replace(src, tgt)
+        # Remove house numbers and common suffixes
+        s = _re.sub(r'\b\d+[A-Z]?\b', '', s)
+        s = _re.sub(r'\s+', ' ', s).strip()
+        return s
+    na, nb = _norm(street_a), _norm(street_b)
+    if not na or not nb: return None  # can't compare
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, na, nb).ratio()
 
 
 def load_zones(file=None, market_code=None):
@@ -1011,6 +1045,9 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
     phone_col_l  = col_map_leads.get("phone")
     street_col_l = col_map_leads.get("street")
     city_col_l   = col_map_leads.get("city")
+    lat_col_l    = col_map_leads.get("lat")
+    lng_col_l    = col_map_leads.get("lng")
+    url_col_l    = col_map_leads.get("url")
     grid_col_l   = col_map_leads.get("grid")
     lead_id_col  = col_map_leads.get("lead_id")
     url_col_l    = col_map_leads.get("url")
@@ -1021,6 +1058,13 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
         lead_name   = row.get(name_col_l, "") if name_col_l else ""
         lead_street = row.get(street_col_l, "") if street_col_l else ""
         lead_city   = norm_city(row.get(city_col_l, ""), char_map, market_cfg.get("code", ""))
+        lead_lat    = row.get(lat_col_l) if lat_col_l else None
+        lead_lng    = row.get(lng_col_l) if lng_col_l else None
+        try:
+            lead_lat = float(lead_lat) if lead_lat is not None and not pd.isna(lead_lat) else None
+            lead_lng = float(lead_lng) if lead_lng is not None and not pd.isna(lead_lng) else None
+        except (ValueError, TypeError):
+            lead_lat = lead_lng = None
 
         # URL key: use explicit URL column if present, otherwise reconstruct from name+street
         # (matches what the URL generator tab produces and what Apify searchPageUrl contains)
@@ -1050,14 +1094,47 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
                     match_method = f"Phone + Name {phone_name_score:.2f}"
                 # If city mismatch with good name score — silently skip (recycled number or wrong city)
 
-        # 2. Exact name + city match (most precise)
+        # 2. Exact name + city match — validate with street + coords if available
         if crm_match is None:
             nn = norm_name(lead_name, char_map)
             if nn and lead_city:
                 candidate = crm_name_city_dict.get((nn, lead_city))
                 if candidate is not None:
-                    crm_match    = candidate
-                    match_method = "Name + City (exact)"
+                    # ── Street validation ──────────────────────────
+                    crm_street = candidate.get(col_map_crm.get("street", ""), "") if col_map_crm.get("street") else ""
+                    str_sim = street_similarity(lead_street, crm_street, char_map) if lead_street and crm_street else None
+
+                    # ── Coordinate validation (lead coords vs Apify result) ──
+                    coord_ok = None
+                    if lead_lat and lead_lng:
+                        # Check distance from lead's coords to the Apify-matched GM result
+                        _url_key = norm_url(str(row.get(url_col_l, "") or "")) if url_col_l else ""
+                        apy_check = apify_dict.get(_url_key)
+                        if apy_check is not None:
+                            apy_lat_col = col_map_apify.get("lat") if col_map_apify else None
+                            apy_lng_col = col_map_apify.get("lng") if col_map_apify else None
+                            if apy_lat_col and apy_lng_col:
+                                try:
+                                    apy_lat = float(apy_check.get(apy_lat_col, 0))
+                                    apy_lng = float(apy_check.get(apy_lng_col, 0))
+                                    dist = haversine_km(lead_lat, lead_lng, apy_lat, apy_lng)
+                                    if dist is not None:
+                                        coord_ok = dist <= 0.5  # within 500m
+
+                                except (ValueError, TypeError):
+                                    pass
+
+                    # Block if street clearly mismatches (< 0.35 similarity) and no coord confirmation
+                    if str_sim is not None and str_sim < 0.35 and coord_ok is not True:
+                        pass  # skip — street too different, likely a different business
+                    else:
+                        crm_match    = candidate
+                        method_note  = ""
+                        if str_sim is not None:
+                            method_note += f" | street {str_sim:.2f}"
+                        if coord_ok is True:
+                            method_note += " | coords ✓"
+                        match_method = f"Name + City (exact){method_note}"
 
         # 3. Exact name only — verify city is compatible
         if crm_match is None:
@@ -1068,8 +1145,14 @@ def classify_leads(leads_df, col_map_leads, crm_df, col_map_crm,
                     crm_cand_city = candidate.get("_city_norm", "")
                     city_ok       = cities_compatible(lead_city, crm_cand_city)
                     if city_ok:
-                        crm_match    = candidate
-                        match_method = "Name (exact)" if crm_cand_city else "Name (exact, city unverified)"
+                        # Also require street similarity > 0.4 for name-only matches if street available
+                        crm_street = candidate.get(col_map_crm.get("street", ""), "") if col_map_crm.get("street") else ""
+                        str_sim    = street_similarity(lead_street, crm_street, char_map) if lead_street and crm_street else None
+                        if str_sim is not None and str_sim < 0.35:
+                            pass  # skip — street too different for name-only match
+                        else:
+                            crm_match    = candidate
+                            match_method = "Name (exact)" if crm_cand_city else "Name (exact, city unverified)"
 
         label = dup_grid = dup_name = dup_crm_city = dup_status = dup_reason = dup_method = ""
         if crm_match is not None:
