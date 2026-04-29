@@ -407,7 +407,11 @@ def find_header_row(file, key_col="GRID"):
 def load_leads(file, market_cfg):
     """Load leads file and auto-detect columns."""
     if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
+        raw = file.read(4096).decode("utf-8", errors="replace")
+        file.seek(0)
+        sep = ";" if raw.count(";") > raw.count(",") else ","
+        df = pd.read_csv(file, sep=sep, quotechar='"',
+                         on_bad_lines="skip", engine="python")
     else:
         header_row = find_header_row(file, key_col="GRID")
         df = pd.read_excel(file, header=header_row)
@@ -435,7 +439,11 @@ def load_crm(file, market_cfg):
     """Load CRM file, handling Salesforce report headers."""
     prefix = market_cfg["phone_prefix"]
     if file.name.endswith(".csv"):
-        df = pd.read_csv(file)
+        raw = file.read(4096).decode("utf-8", errors="replace")
+        file.seek(0)
+        sep = ";" if raw.count(";") > raw.count(",") else ","
+        df = pd.read_csv(file, sep=sep, quotechar='"',
+                         on_bad_lines="skip", engine="python")
     else:
         header_row = find_header_row(file, key_col="GRID")
         df = pd.read_excel(file, header=header_row)
