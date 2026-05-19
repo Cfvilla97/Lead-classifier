@@ -139,6 +139,14 @@ MARKETS = {
         "country_suffix": "Austria",
         "phone_prefix": "43",
     },
+    "PK": {
+        "code": "PK",
+        "name": "Pakistan",
+        "flag": "🇵🇰",
+        "char_map": {},
+        "country_suffix": "Pakistan",
+        "phone_prefix": "92",
+    },
 }
 
 # Allowlist approach — only these categories are considered Foodora-eligible.
@@ -672,6 +680,21 @@ _DISTRICT_MAP = {
         "DÖBLING":"WIEN","BRIGITTENAU":"WIEN","FLORIDSDORF":"WIEN",
         "DONAUSTADT":"WIEN","LIESING":"WIEN",
     },
+    "PK": {
+        "SADDAR":"KARACHI","GULSHAN":"KARACHI","KORANGI":"KARACHI","MALIR":"KARACHI",
+        "NORTH KARACHI":"KARACHI","NORTH NAZIMABAD":"KARACHI","ORANGI TOWN":"KARACHI",
+        "PECHS":"KARACHI","JAUHAR":"KARACHI","GULSHAN E HADEED":"KARACHI",
+        "GULSHAN E MAYMAR":"KARACHI","BAHRIA TOWN KARACHI":"KARACHI",
+        "DHA KARACHI":"KARACHI","MALIR CANTT":"KARACHI",
+        "GULBERG":"LAHORE","DHA":"LAHORE","BAHRIA TOWN":"LAHORE",
+        "MODEL TOWN":"LAHORE","JOHAR TOWN SOUTH":"LAHORE","VALENCIA":"LAHORE",
+        "FEROZPUR ROAD":"LAHORE","OLD LAHORE ANARKALI":"LAHORE",
+        "ALLAMA IQBAL TOWN":"LAHORE","SHALIMAR":"LAHORE",
+        "RAWAL":"RAWALPINDI","RAWALPINDI CANTT":"RAWALPINDI","ADYALA":"RAWALPINDI",
+        "BAHRIA TOWN ISB":"ISLAMABAD","DHA ISB":"ISLAMABAD",
+        "DHA PHASE 2":"ISLAMABAD","F7":"ISLAMABAD","G13":"ISLAMABAD",
+        "GHAURI TOWN":"ISLAMABAD",
+    },
 }
 
 
@@ -772,7 +795,7 @@ def load_zones(file=None, market_code=None):
             return []
 
     # ── Built-in bundled zones ─────────────────────────────────
-    if market_code in ("NO", "TR", "SE", "HU", "AT", "CZ"):
+    if market_code in ("NO", "TR", "SE", "HU", "AT", "CZ", "PK"):
         # Look for the JSON file next to app.py
         base_dir  = os.path.dirname(os.path.abspath(__file__))
         json_path = os.path.join(base_dir, f"zones_{market_code}.json")
@@ -1930,7 +1953,7 @@ Not found on Google or confidence score too low
         st.divider()
         st.subheader("Delivery zone check")
         st.markdown("""
-**Built-in zones:** 🇳🇴 Norway · 🇹🇷 Turkey · 🇸🇪 Sweden · 🇭🇺 Hungary · 🇦🇹 Austria · 🇨🇿 Czech Republic
+**Built-in zones:** 🇳🇴 Norway · 🇹🇷 Turkey · 🇸🇪 Sweden · 🇭🇺 Hungary · 🇦🇹 Austria · 🇨🇿 Czech Republic · 🇵🇰 Pakistan
 
 Zones load automatically when either market is selected. For other markets, upload a WKT zone file manually.
 
