@@ -2056,8 +2056,9 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
                         use_container_width=True,
                     )
                 else:
+                    _country_name = market_cfg.get("country_suffix", market_code)
                     st.markdown(
-                        "Turkey has **more than 100k accounts** so the standard report is capped. "
+                        f"**{market_cfg['flag']} {market_cfg['name']}** has more than 100k accounts so the standard report is capped. "
                         "Use Salesforce Inspector with the SOQL query below to export the full CRM."
                     )
                     st.code(
@@ -2065,7 +2066,7 @@ Phone match (0.4) + name similarity × 0.4 + location confirmation (0.2). Leads 
                         "Account_Status__c, Status_Reason__c,\n"
                         "BillingCity\n"
                         "FROM Account\n"
-                        "WHERE BillingCountry = 'Turkey'",
+                        f"WHERE BillingCountry = '{_country_name}'",
                         language="sql",
                     )
                     st.caption("Install the Chrome extension → open on any Salesforce page → Export tab → paste query → Download CSV.")
