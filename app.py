@@ -415,29 +415,27 @@ def find_header_row(file, key_col="GRID"):
 def load_leads(file, market_cfg):
     """Load leads file and auto-detect columns."""
     if file.name.endswith(".csv"):
-        raw_bytes = file.read(4096)
+        # Read full file to detect encoding and separator
+        full_bytes = file.read()
         file.seek(0)
+        from io import StringIO
+        sep = None
+        df  = None
         for enc in ("utf-8", "utf-8-sig", "windows-1252", "latin-1", "iso-8859-1"):
             try:
-                raw = raw_bytes.decode(enc)
-                sep = ";" if raw.count(";") > raw.count(",") else ","
-                file.seek(0)
-                df = pd.read_csv(file, sep=sep, quotechar='"',
-                                 on_bad_lines="skip", engine="python",
-                                 encoding=enc)
+                raw = full_bytes.decode(enc)
+                _sep = ";" if raw.count(";") > raw.count(",") else ","
+                df  = pd.read_csv(StringIO(raw), sep=_sep, quotechar='"',
+                                  on_bad_lines="skip", engine="python")
+                sep = _sep
                 break
             except (UnicodeDecodeError, Exception):
-                file.seek(0)
                 continue
-        else:
-            file.seek(0)
-            raw = file.read().decode("latin-1", errors="replace")
+        if df is None:
+            raw = full_bytes.decode("latin-1", errors="replace")
             sep = ";" if raw.count(";") > raw.count(",") else ","
-            from io import StringIO
-            df = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
-                             on_bad_lines="skip", engine="python")
-        df = pd.read_csv(file, sep=sep, quotechar='"',
-                         on_bad_lines="skip", engine="python")
+            df  = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
+                              on_bad_lines="skip", engine="python")
     else:
         header_row = find_header_row(file, key_col="GRID")
         df = pd.read_excel(file, header=header_row)
@@ -465,30 +463,24 @@ def load_crm(file, market_cfg):
     """Load CRM file, handling Salesforce report headers."""
     prefix = market_cfg["phone_prefix"]
     if file.name.endswith(".csv"):
-        # Try encodings in order — utf-8 first, then common Windows/Nordic encodings
-        raw_bytes = file.read(4096)
+        full_bytes = file.read()
         file.seek(0)
+        from io import StringIO
+        df = None
         for enc in ("utf-8", "utf-8-sig", "windows-1252", "latin-1", "iso-8859-1"):
             try:
-                raw = raw_bytes.decode(enc)
+                raw = full_bytes.decode(enc)
                 sep = ";" if raw.count(";") > raw.count(",") else ","
-                file.seek(0)
-                df = pd.read_csv(file, sep=sep, quotechar='"',
-                                 on_bad_lines="skip", engine="python",
-                                 encoding=enc)
+                df  = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
+                                  on_bad_lines="skip", engine="python")
                 break
             except (UnicodeDecodeError, Exception):
-                file.seek(0)
                 continue
-        else:
-            # Last resort — decode with errors replaced
-            file.seek(0)
-            raw = file.read().decode("latin-1", errors="replace")
-            file.seek(0)
+        if df is None:
+            raw = full_bytes.decode("latin-1", errors="replace")
             sep = ";" if raw.count(";") > raw.count(",") else ","
-            from io import StringIO
-            df = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
-                             on_bad_lines="skip", engine="python")
+            df  = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
+                              on_bad_lines="skip", engine="python")
     else:
         header_row = find_header_row(file, key_col="GRID")
         df = pd.read_excel(file, header=header_row)
