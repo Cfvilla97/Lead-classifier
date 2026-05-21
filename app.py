@@ -415,9 +415,27 @@ def find_header_row(file, key_col="GRID"):
 def load_leads(file, market_cfg):
     """Load leads file and auto-detect columns."""
     if file.name.endswith(".csv"):
-        raw = file.read(4096).decode("utf-8", errors="replace")
+        raw_bytes = file.read(4096)
         file.seek(0)
-        sep = ";" if raw.count(";") > raw.count(",") else ","
+        for enc in ("utf-8", "utf-8-sig", "windows-1252", "latin-1", "iso-8859-1"):
+            try:
+                raw = raw_bytes.decode(enc)
+                sep = ";" if raw.count(";") > raw.count(",") else ","
+                file.seek(0)
+                df = pd.read_csv(file, sep=sep, quotechar='"',
+                                 on_bad_lines="skip", engine="python",
+                                 encoding=enc)
+                break
+            except (UnicodeDecodeError, Exception):
+                file.seek(0)
+                continue
+        else:
+            file.seek(0)
+            raw = file.read().decode("latin-1", errors="replace")
+            sep = ";" if raw.count(";") > raw.count(",") else ","
+            from io import StringIO
+            df = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
+                             on_bad_lines="skip", engine="python")
         df = pd.read_csv(file, sep=sep, quotechar='"',
                          on_bad_lines="skip", engine="python")
     else:
@@ -447,11 +465,30 @@ def load_crm(file, market_cfg):
     """Load CRM file, handling Salesforce report headers."""
     prefix = market_cfg["phone_prefix"]
     if file.name.endswith(".csv"):
-        raw = file.read(4096).decode("utf-8", errors="replace")
+        # Try encodings in order — utf-8 first, then common Windows/Nordic encodings
+        raw_bytes = file.read(4096)
         file.seek(0)
-        sep = ";" if raw.count(";") > raw.count(",") else ","
-        df = pd.read_csv(file, sep=sep, quotechar='"',
-                         on_bad_lines="skip", engine="python")
+        for enc in ("utf-8", "utf-8-sig", "windows-1252", "latin-1", "iso-8859-1"):
+            try:
+                raw = raw_bytes.decode(enc)
+                sep = ";" if raw.count(";") > raw.count(",") else ","
+                file.seek(0)
+                df = pd.read_csv(file, sep=sep, quotechar='"',
+                                 on_bad_lines="skip", engine="python",
+                                 encoding=enc)
+                break
+            except (UnicodeDecodeError, Exception):
+                file.seek(0)
+                continue
+        else:
+            # Last resort — decode with errors replaced
+            file.seek(0)
+            raw = file.read().decode("latin-1", errors="replace")
+            file.seek(0)
+            sep = ";" if raw.count(";") > raw.count(",") else ","
+            from io import StringIO
+            df = pd.read_csv(StringIO(raw), sep=sep, quotechar='"',
+                             on_bad_lines="skip", engine="python")
     else:
         header_row = find_header_row(file, key_col="GRID")
         df = pd.read_excel(file, header=header_row)
